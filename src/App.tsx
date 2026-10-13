@@ -11,7 +11,7 @@ import {
   DEVIATION_KINDS, kolli, lineDone, mins, sortByLoc,
   type DeviationKind, type Line, type Order, type Products, type Snapshot, type Status,
 } from "./data"
-import { createStore } from "./store"
+import { createStore, type SyncStatus } from "./store"
 import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import { Chip, Header, Pict, ScanBar } from "./parts"
@@ -74,7 +74,9 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [shakeN, setShakeN] = useState(0)
   const busy = useRef(false)
 
-  useEffect(() => store.subscribe(setSnap, msg => say("err", "Kunde inte nå databasen", msg, true)), [])
+  const [sync, setSync] = useState<SyncStatus>({ online: true, pending: 0 })
+  useEffect(() => store.subscribe(setSnap, msg => say("err", "Något gick inte att spara", msg, true)), [])
+  useEffect(() => store.onStatus(setSync), [])
   useEffect(() => {
     if (!flash || flash.sticky) return
     const t = setTimeout(() => setFlash(null), 1700)
@@ -132,6 +134,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   return (
     <div className="min-h-full">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
+      <SyncBar sync={sync} />
       {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => go({ name: t })} />}
       {view.name === "inleverans" && (
         <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera}
@@ -139,7 +142,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
       )}
       {view.name === "saldo" && <Saldo products={products} orders={orders} />}
       {view.name === "queue" && (
-        <Queue orders={orders} user={user}
+        <Queue orders={orders} user={user} sync={sync}
           onStart={ids => once(async () => {
             if (await store.claimMany(ids, me)) go({ name: "pick" })
             else say("warn", ids.length > 1 ? "Någon order är redan tagen" : "Ordern är redan tagen", "Någon annan hann före, eller så har du en runda igång.")
@@ -186,6 +189,17 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
 }
 
 /* ---------- Delar ---------- */
+
+function SyncBar({ sync }: { sync: SyncStatus }) {
+  if (sync.online && !sync.pending) return null
+  return (
+    <div role="status" className={cn("px-4 py-2 text-center text-[13px] font-semibold", sync.online ? "bg-secondary text-secondary-foreground" : "bg-warn-soft text-warn")}>
+      {sync.online
+        ? `Skickar ${sync.pending} ändringar som gjordes utan nät…`
+        : `Ingen täckning. Plocket sparas i mobilen${sync.pending ? ` (${sync.pending} väntar)` : ""} och skickas när nätet är tillbaka.`}
+    </div>
+  )
+}
 
 function UspStrip() {
   const items = ["Lagervaror skickas inom 24h", "Express före kl. 12", "Varje kolli skannas"]
@@ -262,8 +276,8 @@ function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => vo
 
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, user, onStart, onOpen, onReset }: {
-  orders: Order[]; user: User; onStart: (ids: string[]) => void; onOpen: () => void; onReset: () => void
+function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
+  orders: Order[]; user: User; sync: SyncStatus; onStart: (ids: string[]) => void; onOpen: () => void; onReset: () => void
 }) {
   const me = user.name
   const [picked, setPicked] = useState<string[]>([])
@@ -284,9 +298,10 @@ function Queue({ orders, user, onStart, onOpen, onReset }: {
         <div className="mt-5 flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Hej {me}!</h1>
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ROLE_LABEL[user.role]}</span>
-          <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold", store.mode === "supabase" ? "text-ok" : "text-muted-foreground")}>
-            <span className={cn("h-2 w-2 rounded-full", store.mode === "supabase" ? "bg-ok" : "bg-muted-foreground")} />
-            {store.mode === "supabase" ? "Live, delas med alla" : "Lokal demo"}
+          <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold",
+            store.mode === "local" ? "text-muted-foreground" : sync.online ? "text-ok" : "text-warn")}>
+            <span className={cn("h-2 w-2 rounded-full", store.mode === "local" ? "bg-muted-foreground" : sync.online ? "bg-ok" : "bg-warn")} />
+            {store.mode === "local" ? "Lokal demo" : sync.online ? "Live, delas med alla" : "Utan nät"}
           </span>
         </div>
         <p className="text-muted-foreground">{cnt("ny")} order väntar på plock i dag.</p>
