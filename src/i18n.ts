@@ -11,10 +11,10 @@ export const LANGS: { code: Lang; name: string; short: string }[] = [
 const RTL: Lang[] = ["ar"]
 const KEY = "dpj-plock-lang"
 
+// Svenska är standard. Den som vill ha ett annat språk väljer det en gång, och valet ligger kvar i mobilen.
 export function getLang(): Lang {
   try { const v = localStorage.getItem(KEY) as Lang | null; if (v && LANGS.some(l => l.code === v)) return v } catch { /* privat läge */ }
-  const nav = navigator.language.slice(0, 2)
-  return (LANGS.find(l => l.code === nav)?.code ?? "sv") as Lang
+  return "sv"
 }
 export const isRtl = (l: Lang = lang) => RTL.includes(l)
 
@@ -337,6 +337,7 @@ const DICT: Record<string, [string, string, string, string]> = {
   "slip.cust": ["Kund", "Customer", "Klient", "العميل"],
   "slip.date": ["Datum", "Date", "Data", "التاريخ"],
   "slip.ship": ["Frakt", "Shipping", "Dostawa", "الشحن"],
+  "slip.weight": ["Vikt", "Weight", "Waga", "الوزن"],
   "slip.by": ["Packad av", "Packed by", "Spakował", "غلّفه"],
   "slip.sku": ["Artikelnr", "Item no.", "Nr artykułu", "رقم الصنف"],
   "slip.name": ["Benämning", "Description", "Nazwa", "الوصف"],
