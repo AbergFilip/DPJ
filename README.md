@@ -47,6 +47,10 @@ Varje artikel har en hyllplats och ett saldo. Under fliken Inleverans skannar ma
 
 I kön kan plockaren välja upp till fyra order med "Lägg i runda" och starta dem tillsammans. Plocklistan slår ihop alla rader i gångordning och visar för varje rad vilken låda (order) varan ska i. När allt är plockat skickas alla order till pack på en gång. Databasfunktionen `claim_orders` tar alla order eller ingen, så två plockare kan inte dela på en runda.
 
+## Packstation
+
+Fliken Pack är sista steget. Packaren skannar ordernumret på plocklådan (streckkoder för demon finns på `/etiketter.html`), skannar varorna en i taget som kontroll och väger kollit. Knappen "Lägg på vågen" simulerar en våg utifrån artiklarnas vikt, och appen varnar om vikten skiljer mer än tio procent från förväntat. Sedan skrivs packsedeln ut, med restnoterade rader för det som saknades. Ordern får status "Skickad". Databasfunktionen `pack_order` sparar vikt, packare och tid.
+
 ## Utan nät
 
 Appens filer cachas i mobilen (PWA), och senaste kända orderläget sparas lokalt. Tappar mobilen täckningen fortsätter plocket mot den lokala kopian: varje skanning sparas i en kö i mobilen och en gul rad visar hur många ändringar som väntar. När nätet är tillbaka skickas de i ordning. Om någon annan hann ta samma order under tiden sparas inte den ändringen, och plockaren får ett meddelande. Reglerna för plock finns i `src/ops.ts` och används både i demoläget och utan nät.

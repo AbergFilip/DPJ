@@ -20,6 +20,7 @@ export interface Store {
   pickItem(lineId: string, picker: string): Promise<number | null>
   reportDeviation(lineId: string, picker: string, kind: DeviationKind, found: number, note: string, photo: Blob | null): Promise<boolean>
   finish(orderId: string, picker: string): Promise<Status | null>
+  pack(orderId: string, packer: string, weight: number): Promise<boolean>
   importOrders(orders: NewOrder[]): Promise<number>
   receive(sku: string, qty: number, who: string): Promise<number | null>
   reset(): Promise<void>
@@ -69,6 +70,7 @@ function localStore(): Store {
       return run(() => ops.reportDeviation(st, lineId, picker, kind, found, note, url))
     },
     finish: async (id, picker) => run(() => ops.finish(st, id, picker)),
+    pack: async (id, packer, weight) => run(() => ops.pack(st, id, packer, weight)),
     async importOrders(list) {
       const fresh = list.filter(n => !st.orders.some(o => o.id === n.id))
       st.orders.push(...fresh.map(n => ({
@@ -84,7 +86,10 @@ function localStore(): Store {
 
 /* ---------- Supabase ---------- */
 
-interface OrderRow { id: string; cust: string; ship: "exp" | "std"; ship_txt: string; due: string; status: Status; picker: string | null; started_at: string | null; done_at: string | null }
+interface OrderRow {
+  id: string; cust: string; ship: "exp" | "std"; ship_txt: string; due: string; status: Status; picker: string | null; started_at: string | null; done_at: string | null
+  packer: string | null; packed_at: string | null; weight: number | string | null
+}
 interface ProductRow extends Omit<Product, "minStock"> { min_stock: number }
 interface MoveRow { id: number; sku: string; qty: number; kind: StockMove["kind"]; who: string | null; note: string | null; at: string }
 interface LineRow { id: number; order_id: string; sku: string; qty: number; picked: number; loc_ok: boolean; dev_kind: DeviationKind | null; dev_found: number | null; dev_note: string | null; dev_photo_url: string | null }
@@ -96,6 +101,7 @@ type Queued =
   | { op: "confirmLocation" | "pickItem"; lineId: string; picker: string }
   | { op: "reportDeviation"; lineId: string; picker: string; kind: DeviationKind; found: number; note: string; photo: string | null }
   | { op: "finish"; id: string; picker: string }
+  | { op: "pack"; id: string; packer: string; weight: number }
   | { op: "receive"; sku: string; qty: number; who: string }
 
 const CACHE_KEY = "dpj-plock-cache-v1"
@@ -144,6 +150,7 @@ function supabaseStore(sb: SupabaseClient): Store {
     const orders: Order[] = (o.data as OrderRow[]).map(r => ({
       id: r.id, cust: r.cust, ship: r.ship, shipTxt: r.ship_txt, due: r.due, status: r.status,
       picker: r.picker, startedAt: ts(r.started_at), doneAt: ts(r.done_at),
+      packer: r.packer, packedAt: ts(r.packed_at), weight: r.weight == null ? null : Number(r.weight),
       lines: (byOrder.get(r.id) || []).map(x => ({
         id: String(x.id), sku: x.sku, qty: x.qty, picked: x.picked, locOk: x.loc_ok,
         dev: x.dev_kind ? { kind: x.dev_kind, found: x.dev_found ?? 0, note: x.dev_note ?? "", photo: x.dev_photo_url } : null,
@@ -180,6 +187,7 @@ function supabaseStore(sb: SupabaseClient): Store {
         return call("report_deviation", { p_line: Number(q.lineId), p_picker: q.picker, p_kind: q.kind, p_found: q.found, p_note: q.note, p_photo_url: url })
       }
       case "finish": return call("finish_order", { p_order: q.id, p_picker: q.picker })
+      case "pack": return call("pack_order", { p_order: q.id, p_packer: q.packer, p_weight: q.weight })
       case "receive": return call("receive_goods", { p_sku: q.sku, p_qty: q.qty, p_who: q.who })
     }
   }
@@ -193,6 +201,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       case "pickItem": return ops.pickItem(st, q.lineId, q.picker)
       case "reportDeviation": return ops.reportDeviation(st, q.lineId, q.picker, q.kind, q.found, q.note, q.photo)
       case "finish": return ops.finish(st, q.id, q.picker)
+      case "pack": return ops.pack(st, q.id, q.packer, q.weight)
       case "receive": return ops.receive(st, q.sku, q.qty, q.who)
     }
   }
@@ -263,6 +272,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       return act({ op: "reportDeviation", lineId, picker, kind, found, note, photo: photo ? await toDataUrl(photo) : null })
     },
     finish: (id, picker) => act({ op: "finish", id, picker }),
+    pack: (id, packer, weight) => act({ op: "pack", id, packer, weight }),
     receive: (sku, qty, who) => act({ op: "receive", sku, qty, who }),
     async importOrders(list) {
       const n = await call<number>("import_orders", {

@@ -19,9 +19,10 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
+  skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
 }
 const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse" }
-const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3 }
+const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }
 
 const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
 const isLate = (o: Order, now: number) => (o.status === "ny" || o.status === "plock") && now > dueAt(o)
@@ -82,7 +83,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const products = snap.products
 
   const count = (s: Status) => orders.filter(o => o.status === s).length
-  const done = orders.filter(o => o.status === "pack" || o.status === "avv")
+  const done = orders.filter(o => o.status === "pack" || o.status === "avv" || o.status === "skickad")
   const avgMin = avg(done.map(pickTime).filter((x): x is number => x != null))
   const late = orders.filter(o => isLate(o, now))
   const active = orders.filter(o => o.status === "plock")
@@ -123,7 +124,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Kpi icon={<Clock className="h-4 w-4" />} label="Väntar" value={count("ny")} sub={`${orders.filter(o => o.status === "ny").reduce((n, o) => n + kolli(o), 0)} kolli`} />
           <Kpi icon={<Users className="h-4 w-4" />} label="Plockas nu" value={count("plock")} tone="warn" />
-          <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" />
+          <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" sub={`${count("skickad")} skickade`} />
           <Kpi icon={<AlertTriangle className="h-4 w-4" />} label="Avvikelser" value={count("avv")} tone={count("avv") ? "bad" : undefined} sub={`${deviations.length} ${deviations.length === 1 ? "rad" : "rader"}`} />
           <Kpi icon={<Timer className="h-4 w-4" />} label="Snitt plocktid" value={avgMin != null ? `${mins(avgMin)} min` : "–"} sub={`${done.length} klara order`} />
           <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
@@ -132,7 +133,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <Section title="Alla order" right={
             <div className="flex flex-wrap gap-1">
-              {(["alla", "plock", "ny", "avv", "pack"] as const).map(s => (
+              {(["alla", "plock", "ny", "avv", "pack", "skickad"] as const).map(s => (
                 <button key={s} onClick={() => setFilter(s)}
                   className={cn("rounded px-2 py-1 text-xs font-semibold", filter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
                   {s === "alla" ? "Alla" : STATUS[s].label}

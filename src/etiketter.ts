@@ -1,7 +1,7 @@
 // Utskrivbara demoetiketter: hyllplats (Code 128) och vara (EAN-13) för varje demoartikel, i gångordning.
 import JsBarcode from "jsbarcode"
 import "./index.css"
-import { SEED_PRODUCTS } from "./data"
+import { SEED_PRODUCTS, seedOrders } from "./data"
 
 const products = Object.values(SEED_PRODUCTS).sort((a, b) => a.loc.localeCompare(b.loc, "sv", { numeric: true }))
 const root = document.getElementById("root")!
@@ -25,6 +25,17 @@ root.innerHTML = `
         <div class="font-semibold leading-tight">${p.name}</div>
         <div class="text-sm"><span class="rounded bg-accent px-1 font-bold text-accent-foreground">${p.variant}</span></div>
         <svg class="mt-2 h-auto w-full" data-code="${p.ean}" data-format="EAN13"></svg>
+      </section>`).join("")}
+  </div>
+  <h2 class="mb-1 mt-10 text-2xl font-extrabold tracking-tight">Order till packstationen</h2>
+  <p class="mb-4 max-w-2xl text-muted-foreground">I skarp drift sitter ordernumret på plocklådan eller plocklistan. Skanna det i fliken Pack när ordern är plockad.</p>
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-3 print:gap-2">
+    ${seedOrders().sort((a, b) => a.id.localeCompare(b.id)).map(o => `
+      <section class="break-inside-avoid rounded-md border bg-card p-4">
+        <div class="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Order</div>
+        <div class="text-2xl font-extrabold leading-none">#${o.id}</div>
+        <div class="truncate text-sm text-muted-foreground">${o.cust}</div>
+        <svg class="mt-2 h-auto w-full" data-code="${o.id}" data-format="CODE128"></svg>
       </section>`).join("")}
   </div>
   <p class="mt-6 text-sm text-muted-foreground">Påhittade artiklar och koder, bara för demo.</p>`

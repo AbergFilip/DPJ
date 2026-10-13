@@ -16,10 +16,11 @@ import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import { Chip, Header, Pict, ScanBar } from "./parts"
 import { Inleverans, Saldo } from "./Lager"
+import { Pack, PackingSlip } from "./Pack"
 
 const store = createStore()
 
-type Tab = "queue" | "inleverans" | "saldo"
+type Tab = "queue" | "pack" | "inleverans" | "saldo"
 type View = { name: Tab } | { name: "pick" } | { name: "done" }
 // En plockrunda är plockarens pågående order (en eller flera). Varje order får en låda.
 type RoundLine = Line & { orderId: string; box: number }
@@ -38,6 +39,7 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
+  skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
 }
 
 let actx: AudioContext | undefined
@@ -72,6 +74,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [flash, setFlash] = useState<Flash | null>(null)
   const [devOpen, setDevOpen] = useState(false)
   const [shakeN, setShakeN] = useState(0)
+  const [slip, setSlip] = useState<Order | null>(null)
   const busy = useRef(false)
 
   const [sync, setSync] = useState<SyncStatus>({ online: true, pending: 0 })
@@ -132,13 +135,19 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   }
 
   return (
-    <div className="min-h-full">
+    <>
+    <div className="min-h-full print:hidden">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
       <SyncBar sync={sync} />
       {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => go({ name: t })} />}
       {view.name === "inleverans" && (
         <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera}
           onReceive={(sku, qty) => store.receive(sku, qty, me)} />
+      )}
+      {view.name === "pack" && (
+        <Pack orders={orders} products={products} me={me} say={say} onNoCamera={noCamera}
+          onPack={(id, w) => store.pack(id, me, w)}
+          onPrint={o => { setSlip(o); setTimeout(() => window.print(), 150) }} />
       )}
       {view.name === "saldo" && <Saldo products={products} orders={orders} />}
       {view.name === "queue" && (
@@ -185,6 +194,8 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
           })} />
       )}
     </div>
+    {slip && <PackingSlip o={slip} products={products} />}
+    </>
   )
 }
 
@@ -248,7 +259,7 @@ function ShipBadge({ o }: { o: Order }) {
 }
 
 function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void }) {
-  const tabs: [Tab, string][] = [["queue", "Plock"], ["inleverans", "Inleverans"], ["saldo", "Saldo"]]
+  const tabs: [Tab, string][] = [["queue", "Plock"], ["pack", "Pack"], ["inleverans", "Inleverans"], ["saldo", "Saldo"]]
   return (
     <>
       <UspStrip />
@@ -281,7 +292,7 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
 }) {
   const me = user.name
   const [picked, setPicked] = useState<string[]>([])
-  const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
+  const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
   const list = [...orders].sort((a, b) => rank(a) - rank(b) || a.due.localeCompare(b.due))
   const cnt = (k: Status) => orders.filter(o => o.status === k).length
   const active = orders.find(o => o.status === "plock" && o.picker === me)
