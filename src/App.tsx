@@ -320,6 +320,7 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
         <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">Demo med påhittade order och artiklar. Inget här kommer från DPJ:s system.</p>
         <div className="mt-3 flex justify-center gap-5">
           <a className="text-sm text-muted-foreground underline" href="/etiketter.html">Streckkoder för demo</a>
+          <a className="text-sm text-muted-foreground underline" href="/admin.html">Översikt</a>
           <button className="text-sm text-muted-foreground underline" onClick={onReset}>Återställ demodata</button>
         </div>
       </main>

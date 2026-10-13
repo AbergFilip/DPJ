@@ -1,0 +1,233 @@
+// Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { AlertTriangle, Camera, Clock, PackageCheck, Timer, Truck, Users, Zap } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { cn } from "@/lib/utils"
+import { PICKERS, kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status } from "./data"
+import { createStore } from "./store"
+
+const store = createStore()
+
+const STATUS: Record<Status, { label: string; cls: string }> = {
+  ny: { label: "Ny", cls: "bg-secondary text-secondary-foreground" },
+  plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
+  pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
+  avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
+}
+const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3 }
+
+const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
+const isLate = (o: Order, now: number) => (o.status === "ny" || o.status === "plock") && now > dueAt(o)
+const picked = (o: Order) => o.lines.reduce((n, l) => n + l.picked, 0)
+const pickTime = (o: Order) => (o.startedAt && o.doneAt ? o.doneAt - o.startedAt : null)
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
+const clock = (ms: number) => new Date(ms).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })
+
+function Logo() {
+  return (
+    <div className="flex select-none items-baseline gap-1.5 text-logo" aria-label="DPJ Workspace">
+      <span className="text-[26px] font-extrabold leading-none tracking-[-0.02em]">DPJ</span>
+      <span className="text-[10px] font-semibold uppercase tracking-[0.28em]">Workspace</span>
+    </div>
+  )
+}
+
+function Kpi({ icon, label, value, sub, tone }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: "ok" | "bad" | "warn" }) {
+  return (
+    <div className="rounded-md border bg-card p-4">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">{icon}{label}</div>
+      <div className={cn("mt-1 text-3xl font-extrabold tabular-nums",
+        tone === "ok" && "text-ok", tone === "bad" && "text-destructive", tone === "warn" && "text-warn")}>{value}</div>
+      {sub && <div className="text-sm text-muted-foreground">{sub}</div>}
+    </div>
+  )
+}
+
+const Section = ({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) => (
+  <section className="min-w-0 rounded-md border bg-card">
+    <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3"><h2 className="flex-1 font-bold">{title}</h2>{right}</div>
+    {children}
+  </section>
+)
+
+export default function Admin() {
+  const [snap, setSnap] = useState<Snapshot | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const [filter, setFilter] = useState<Status | "alla">("alla")
+
+  useEffect(() => store.subscribe(s => { setSnap(s); setError(null) }, setError), [])
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
+
+  const orders = useMemo(() => snap ? [...snap.orders].sort((a, b) =>
+    ORDER[a.status] - ORDER[b.status] || a.due.localeCompare(b.due) || a.id.localeCompare(b.id)) : [], [snap])
+
+  if (!snap) return <div className="p-8 text-muted-foreground">{error ? `Kunde inte hämta data: ${error}` : "Hämtar orderkön…"}</div>
+  const products = snap.products
+
+  const count = (s: Status) => orders.filter(o => o.status === s).length
+  const done = orders.filter(o => o.status === "pack" || o.status === "avv")
+  const avgMin = avg(done.map(pickTime).filter((x): x is number => x != null))
+  const late = orders.filter(o => isLate(o, now))
+  const active = orders.filter(o => o.status === "plock")
+  const deviations = orders.flatMap(o => o.lines.filter(l => l.dev).map(l => ({ o, l, p: products[l.sku] })))
+  const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
+
+  const pickers = [...new Set([...PICKERS, ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
+    const mine = done.filter(o => o.picker === name)
+    return {
+      name,
+      now: active.find(o => o.picker === name),
+      orders: mine.length,
+      kolli: mine.reduce((n, o) => n + kolli(o), 0),
+      avg: avg(mine.map(pickTime).filter((x): x is number => x != null)),
+      devs: mine.reduce((n, o) => n + o.lines.filter(l => l.dev).length, 0),
+    }
+  })
+
+  return (
+    <div className="min-h-full bg-background">
+      <header className="border-b bg-header">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+          <Logo />
+          <h1 className="text-lg font-bold">Plock, översikt</h1>
+          <div className="flex-1" />
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className={cn("h-2 w-2 rounded-full", store.mode === "supabase" ? "bg-ok" : "bg-warn")} />
+            {store.mode === "supabase" ? "Live, uppdateras av sig själv" : "Lokal demo, bara den här webbläsaren"}
+          </span>
+          <a href="/" className="text-sm text-muted-foreground underline">Till plockappen</a>
+        </div>
+      </header>
+      {error && <div className="bg-bad-soft px-4 py-2 text-center text-sm text-destructive">{error}</div>}
+
+      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          <Kpi icon={<Clock className="h-4 w-4" />} label="Väntar" value={count("ny")} sub={`${orders.filter(o => o.status === "ny").reduce((n, o) => n + kolli(o), 0)} kolli`} />
+          <Kpi icon={<Users className="h-4 w-4" />} label="Plockas nu" value={count("plock")} tone="warn" />
+          <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" />
+          <Kpi icon={<AlertTriangle className="h-4 w-4" />} label="Avvikelser" value={count("avv")} tone={count("avv") ? "bad" : undefined} sub={`${deviations.length} ${deviations.length === 1 ? "rad" : "rader"}`} />
+          <Kpi icon={<Timer className="h-4 w-4" />} label="Snitt plocktid" value={avgMin != null ? `${mins(avgMin)} min` : "–"} sub={`${done.length} klara order`} />
+          <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+          <Section title="Alla order" right={
+            <div className="flex flex-wrap gap-1">
+              {(["alla", "plock", "ny", "avv", "pack"] as const).map(s => (
+                <button key={s} onClick={() => setFilter(s)}
+                  className={cn("rounded px-2 py-1 text-xs font-semibold", filter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
+                  {s === "alla" ? "Alla" : STATUS[s].label}
+                </button>
+              ))}
+            </div>}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="px-4 py-2">Order</th><th className="px-2 py-2">Kund</th><th className="px-2 py-2">Klart senast</th>
+                    <th className="px-2 py-2">Status</th><th className="px-2 py-2">Plockare</th><th className="px-2 py-2">Plockat</th><th className="px-4 py-2 text-right">Tid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map(o => {
+                    const t = o.startedAt ? (o.doneAt ?? now) - o.startedAt : null
+                    return (
+                      <tr key={o.id} className="border-b last:border-0">
+                        <td className="px-4 py-2.5 font-bold tabular-nums">{o.id}</td>
+                        <td className="px-2 py-2.5">{o.cust}</td>
+                        <td className="whitespace-nowrap px-2 py-2.5 tabular-nums">
+                          {o.ship === "exp" && <Zap className="mr-1 inline h-3.5 w-3.5 text-warn" />}
+                          <span className={cn(isLate(o, now) && "font-bold text-destructive")}>{o.due}</span>
+                          <span className="ml-1 text-muted-foreground">{o.shipTxt}</span>
+                        </td>
+                        <td className="px-2 py-2.5"><Badge className={cn("rounded shadow-none", STATUS[o.status].cls)}>{STATUS[o.status].label}</Badge></td>
+                        <td className="px-2 py-2.5">{o.picker ?? <span className="text-muted-foreground">–</span>}</td>
+                        <td className="px-2 py-2.5 tabular-nums">{picked(o)}/{kolli(o)}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-muted-foreground">
+                          {t != null ? `${mins(t)} min${o.doneAt ? "" : " pågår"}` : "–"}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!shown.length && <tr><td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">Inga order här.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+
+          <div className="space-y-6">
+            <Section title="Plockas just nu">
+              <div className="divide-y">
+                {active.map(o => {
+                  const next = sortByLoc(o.lines, products).find(l => !lineDone(l))
+                  return (
+                    <div key={o.id} className="px-4 py-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-bold">{o.picker}</span>
+                        <span className="text-sm text-muted-foreground">order {o.id}, {o.cust}</span>
+                      </div>
+                      <Progress value={(picked(o) / Math.max(1, kolli(o))) * 100} className="mt-2 h-2" />
+                      <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                        <span>{picked(o)} av {kolli(o)} kolli{next && products[next.sku] ? `, nästa ${products[next.sku].loc}` : ""}</span>
+                        <span>{o.startedAt ? `${mins(now - o.startedAt)} min` : ""}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+                {!active.length && <p className="px-4 py-4 text-sm text-muted-foreground">Ingen plockar just nu.</p>}
+              </div>
+            </Section>
+
+            <Section title="Plockare">
+              <div className="overflow-x-auto"><table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b"><th className="px-4 py-2">Namn</th><th className="px-2 py-2">Klara</th><th className="px-2 py-2">Kolli</th><th className="px-2 py-2">Snitt</th><th className="px-4 py-2">Avv.</th></tr>
+                </thead>
+                <tbody>
+                  {pickers.map(p => (
+                    <tr key={p.name} className="border-b last:border-0">
+                      <td className="px-4 py-2 font-semibold">{p.name}{p.now && <span className="block text-xs font-normal text-warn">plockar {p.now.id}</span>}</td>
+                      <td className="px-2 py-2 tabular-nums">{p.orders}</td>
+                      <td className="px-2 py-2 tabular-nums">{p.kolli}</td>
+                      <td className="whitespace-nowrap px-2 py-2 tabular-nums">{p.avg != null ? `${mins(p.avg)} min` : "–"}</td>
+                      <td className={cn("px-4 py-2 tabular-nums", p.devs > 0 && "font-bold text-destructive")}>{p.devs}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            </Section>
+          </div>
+        </div>
+
+        <Section title="Avvikelser att åtgärda" right={<span className="text-sm text-muted-foreground">{deviations.length} st</span>}>
+          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            {deviations.map(({ o, l, p }) => (
+              <div key={l.id} className="flex gap-3 rounded-md border p-3">
+                {l.dev!.photo
+                  ? <a href={l.dev!.photo} target="_blank" rel="noreferrer" className="shrink-0"><img src={l.dev!.photo} alt="Foto på avvikelsen" className="h-20 w-20 rounded object-cover" /></a>
+                  : <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded bg-secondary text-[11px] text-muted-foreground"><Camera className="mb-1 h-5 w-5" />Inget foto</div>}
+                <div className="min-w-0 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="rounded bg-bad-soft text-destructive shadow-none hover:bg-bad-soft">{l.dev!.kind}</Badge>
+                    <span className="font-bold">Order {o.id}</span>
+                  </div>
+                  <div className="mt-1 font-semibold leading-tight">{p?.name ?? l.sku}</div>
+                  <div className="text-muted-foreground">{p?.variant} · plats {p?.loc}</div>
+                  <div className="mt-1">Hittade {l.dev!.found} av {l.qty}{o.picker ? `, rapporterat av ${o.picker}` : ""}{o.doneAt ? ` kl ${clock(o.doneAt)}` : ""}</div>
+                  {l.dev!.note && <div className="mt-1 italic">”{l.dev!.note}”</div>}
+                </div>
+              </div>
+            ))}
+            {!deviations.length && <p className="text-sm text-muted-foreground">Inga avvikelser.</p>}
+          </div>
+        </Section>
+
+        <p className="text-sm text-muted-foreground">
+          Påhittade order. Innan skarp drift ska sidan ligga bakom inloggning så att bara arbetsledare ser den.
+        </p>
+      </main>
+    </div>
+  )
+}
