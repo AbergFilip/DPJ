@@ -20,12 +20,12 @@ const P = (sku: string, name: string, variant: string, ean: string, loc: string,
   ({ sku, name, variant, ean, loc, type, brand })
 
 export const SEED_PRODUCTS: Products = Object.fromEntries([
-  P("BRZ-SK-1680-VI", "Bordsskiva Professional", "160×80 cm, vit", "7340001216801", "A-03-2", "skiva", "Brizley"),
-  P("BRZ-SK-1680-EK", "Bordsskiva Professional", "160×80 cm, ek", "7340001216818", "A-03-3", "skiva", "Brizley"),
-  P("BRZ-SK-1890-AN", "Bordsskiva Professional", "180×90 cm, antracit", "7340001218904", "A-05-1", "skiva", "Brizley"),
-  P("BRZ-ST-EL2-SV", "Elstativ Professional, 2 motorer", "svart, för 160–180 cm", "7340001302214", "B-02-1", "stativ", "Brizley"),
-  P("BRZ-ST-EL2-VI", "Elstativ Professional, 2 motorer", "vit, för 160–180 cm", "7340001302221", "B-02-2", "stativ", "Brizley"),
-  P("HU-3L-VI", "Hurts 3 lådor, låsbar", "vit", "7340001455101", "C-06-2", "hurts"),
+  P("BRZ-SK-1680-VI", "Bordsskiva Professional", "160×80 cm, vit", "7340001216806", "A-03-2", "skiva", "Brizley"),
+  P("BRZ-SK-1680-EK", "Bordsskiva Professional", "160×80 cm, ek", "7340001216813", "A-03-3", "skiva", "Brizley"),
+  P("BRZ-SK-1890-AN", "Bordsskiva Professional", "180×90 cm, antracit", "7340001218909", "A-05-1", "skiva", "Brizley"),
+  P("BRZ-ST-EL2-SV", "Elstativ Professional, 2 motorer", "svart, för 160–180 cm", "7340001302219", "B-02-1", "stativ", "Brizley"),
+  P("BRZ-ST-EL2-VI", "Elstativ Professional, 2 motorer", "vit, för 160–180 cm", "7340001302226", "B-02-2", "stativ", "Brizley"),
+  P("HU-3L-VI", "Hurts 3 lådor, låsbar", "vit", "7340001455106", "C-06-2", "hurts"),
   P("KS-ERGO-SV", "Kontorsstol Ergo Plus", "svart tyg", "7340001501209", "C-11-1", "stol"),
   P("SV-160-GR", "Skärmvägg bordsmonterad", "160 cm, grå filt", "7340001604306", "D-04-3", "vagg"),
   P("MA-DUO-SV", "Skärmarm dubbel", "svart", "7340001700107", "E-01-4", "arm"),
