@@ -4,6 +4,7 @@ import { Camera, Keyboard, ScanLine } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ProductType } from "./data"
+import { t } from "./i18n"
 
 // Kameraskannern (zxing) är stor, så den laddas först när någon trycker på kameraknappen.
 const CameraScanner = lazy(() => import("./CameraScanner"))
@@ -51,15 +52,15 @@ export function ScanBar({ placeholder, hint, onScan, onNoCamera, focusKey }: {
     <>
       <form className="mt-3 flex gap-2" autoComplete="off" onSubmit={e => { e.preventDefault(); onScan(code); setCode("") }}>
         <div className="relative min-w-0 flex-1">
-          <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+          <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground rtl:left-auto rtl:right-3" />
           <input ref={inputRef} id="scan" value={code} onChange={e => setCode(e.target.value)} inputMode={typing ? "text" : "none"}
-            placeholder={placeholder} aria-label="Skannad kod"
-            className="h-12 w-full rounded-md border-2 border-dashed border-input bg-card pl-10 pr-3 font-mono text-base text-card-foreground outline-none focus:border-solid focus:border-ring" />
+            placeholder={placeholder} aria-label={t("scan.code")}
+            className="h-12 w-full rounded-md border-2 border-dashed border-input bg-card pl-10 pr-3 rtl:pl-3 rtl:pr-10 font-mono text-base text-card-foreground outline-none focus:border-solid focus:border-ring" />
         </div>
         {!!navigator.mediaDevices?.getUserMedia && (
-          <Button type="button" className="h-12 px-4" onClick={() => setCamera(true)} aria-label="Skanna med kameran"><Camera className="!h-5 !w-5" /></Button>
+          <Button type="button" className="h-12 px-4" onClick={() => setCamera(true)} aria-label={t("scan.camera")}><Camera className="!h-5 !w-5" /></Button>
         )}
-        <Button type="button" variant="outline" className="h-12" aria-label="Skriv in kod" onClick={() => { setTyping(true); setTimeout(() => inputRef.current?.focus(), 0) }}><Keyboard className="!h-5 !w-5" /></Button>
+        <Button type="button" variant="outline" className="h-12" aria-label={t("scan.type")} onClick={() => { setTyping(true); setTimeout(() => inputRef.current?.focus(), 0) }}><Keyboard className="!h-5 !w-5" /></Button>
       </form>
       {camera && <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}><CameraScanner onClose={() => setCamera(false)} onFail={() => { setCamera(false); onNoCamera() }}
         onCode={c => { setCamera(false); onScan(c) }} hint={hint} /></Suspense>}

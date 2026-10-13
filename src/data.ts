@@ -1,17 +1,18 @@
 // Typer, hjälpfunktioner och demodata för lokalt läge. Allt är påhittat, inget kommer från DPJ:s system.
 
 export type ProductType = "skiva" | "stativ" | "hurts" | "stol" | "vagg" | "arm" | "ranna" | "fot"
-export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null; stock: number; minStock: number }
+export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null; stock: number; minStock: number; countedAt?: number | null }
 export interface Deviation { kind: DeviationKind; found: number; note: string; photo: string | null }
 export type DeviationKind = "Saknas" | "Skadad" | "Fel saldo"
 export interface Line { id: string; sku: string; qty: number; picked: number; locOk: boolean; dev: Deviation | null }
-export type Status = "ny" | "plock" | "pack" | "avv"
+export type Status = "ny" | "plock" | "pack" | "avv" | "skickad"
 export interface Order {
   id: string; cust: string; ship: "exp" | "std"; shipTxt: string; due: string; status: Status
   lines: Line[]; picker?: string | null; startedAt?: number | null; doneAt?: number | null
+  packer?: string | null; packedAt?: number | null; weight?: number | null
 }
 export type Products = Record<string, Product>
-export interface StockMove { id: string; sku: string; qty: number; kind: "in" | "plock" | "avvikelse"; who: string | null; note: string | null; at: number }
+export interface StockMove { id: string; sku: string; qty: number; kind: "in" | "plock" | "avvikelse" | "inventering"; who: string | null; note: string | null; at: number }
 export interface Snapshot { products: Products; orders: Order[]; moves: StockMove[] }
 
 export const DEVIATION_KINDS: DeviationKind[] = ["Saknas", "Skadad", "Fel saldo"]
@@ -55,6 +56,12 @@ export const seedOrders = (): Order[] => {
       lines: [L("100479", "KS-ERGO-SV", 2, { picked: 2, locOk: true }), L("100479", "MA-DUO-SV", 2, { picked: 2, locOk: true })] },
   ]
 }
+
+// Ungefärlig vikt per vara i kg, för packstationens simulerade våg och kontrollvägning.
+export const WEIGHT_KG: Record<ProductType, number> = { skiva: 21, stativ: 24, hurts: 19, stol: 15, vagg: 5.5, arm: 3.8, ranna: 1.1, fot: 1.6 }
+export const PACKAGING_KG = 1.2
+export const expectedWeight = (o: Order, products: Products) =>
+  Math.round((PACKAGING_KG + o.lines.reduce((n, l) => n + l.picked * (WEIGHT_KG[products[l.sku]?.type] ?? 1), 0)) * 10) / 10
 
 export const lineDone = (l: Line) => l.picked >= l.qty || !!l.dev
 export const kolli = (o: Order) => o.lines.reduce((n, l) => n + l.qty, 0)

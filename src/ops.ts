@@ -52,6 +52,20 @@ export const ops = {
     if (!o || o.status !== "plock" || o.picker !== picker || !o.lines.every(lineDone)) return null
     o.status = o.lines.some(l => l.dev) ? "avv" : "pack"; o.doneAt = Date.now(); return o.status
   },
+  pack(st: State, id: string, packer: string, weight: number) {
+    const o = st.orders.find(x => x.id === id)
+    if (!o || (o.status !== "pack" && o.status !== "avv") || !(weight > 0 && weight <= 2000)) return false
+    o.status = "skickad"; o.packer = packer; o.packedAt = Date.now(); o.weight = Math.round(weight * 10) / 10; return true
+  },
+  count(st: State, sku: string, counted: number, who: string, note: string) {
+    const p = st.products[sku]
+    if (!p || counted < 0 || counted > 9999) return null
+    const diff = counted - p.stock
+    p.countedAt = Date.now()
+    if (diff !== 0) move(st, sku, diff, "inventering", who, note || null)
+    p.stock = counted
+    return counted
+  },
   receive(st: State, sku: string, qty: number, who: string) {
     if (!st.products[sku] || qty < 1 || qty > 999) return null
     move(st, sku, qty, "in", who); return st.products[sku].stock

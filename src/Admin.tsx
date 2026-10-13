@@ -1,15 +1,16 @@
 // Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, Camera, Clock, PackageCheck, Timer, Truck, Users, Zap } from "lucide-react"
+import { AlertTriangle, Camera, Clock, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status } from "./data"
+import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status, type StockMove } from "./data"
 import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import ImportPanel from "./ImportPanel"
-import { stockRows } from "./Lager"
+import { refillRows, stockRows } from "./Lager"
+import { DAY_END, DAY_START, errorsPerWeek, picksPerHour } from "./stats"
 import { Button } from "@/components/ui/button"
 
 const store = createStore()
@@ -19,9 +20,10 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
+  skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
 }
-const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse" }
-const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3 }
+const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse", inventering: "Inventering" }
+const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }
 
 const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
 const isLate = (o: Order, now: number) => (o.status === "ny" || o.status === "plock") && now > dueAt(o)
@@ -47,6 +49,70 @@ const Section = ({ title, children, right }: { title: string; children: ReactNod
     {children}
   </section>
 )
+
+/* ---------- Statistik över tid ---------- */
+
+// Staplar per timme. Timmar som fyllts med demohistorik ritas ljusare och märks ut under grafen.
+function HourChart({ moves, now }: { moves: StockMove[]; now: number }) {
+  const bars = picksPerHour(moves, now)
+  const max = Math.max(10, ...bars.map(b => b.picks))
+  const total = bars.reduce((n, b) => n + b.picks, 0)
+  const best = bars.reduce((a, b) => (b.picks > a.picks ? b : a), bars[0])
+  const hourNow = new Date(now).getHours()
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-baseline gap-x-4 text-sm text-muted-foreground">
+        <span><b className="text-2xl font-extrabold tabular-nums text-foreground">{total}</b> kolli i dag</span>
+        <span>snitt {Math.round(total / bars.length)} per timme</span>
+        {best.picks > 0 && <span>bäst kl {best.hour}: {best.picks}</span>}
+      </div>
+      <div className="mt-4 flex h-40 items-stretch gap-1.5">
+        {bars.map(b => (
+          <div key={b.hour} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+            <span className="text-[11px] font-bold tabular-nums text-muted-foreground">{b.picks || ""}</span>
+            <div className={cn("w-full rounded-t", b.hour === hourNow ? "bg-primary" : b.demo ? "bg-secondary" : "bg-ok")}
+              style={{ height: `${Math.max(2, (b.picks / max) * 85)}%` }}
+              title={`Kl ${b.hour}: ${b.picks} kolli${b.demo ? " (demohistorik)" : ""}`} />
+            <span className="text-[11px] tabular-nums text-muted-foreground">{b.hour}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Kl {DAY_START}–{DAY_END}. Grönt är plock som gjorts i demon, grått är påhittad historik för timmar som redan passerat.
+      </p>
+    </div>
+  )
+}
+
+// Felrate per vecka: andel order med avvikelse.
+function WeekChart({ orders, now }: { orders: Order[]; now: number }) {
+  const weeks = errorsPerWeek(orders, now)
+  const max = Math.max(2, ...weeks.map(w => w.rate))
+  const last = weeks[weeks.length - 1]
+  const prev = weeks[weeks.length - 2]
+  const trend = prev ? Math.round((last.rate - prev.rate) * 10) / 10 : 0
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-baseline gap-x-4 text-sm text-muted-foreground">
+        <span><b className={cn("text-2xl font-extrabold tabular-nums", last.rate > 5 ? "text-destructive" : "text-foreground")}>{last.rate} %</b> den här veckan</span>
+        <span>{last.devs} av {last.orders} order</span>
+        {prev && <span className={cn("font-semibold", trend > 0 ? "text-destructive" : "text-ok")}>{trend > 0 ? "+" : ""}{trend} mot förra veckan</span>}
+      </div>
+      <div className="mt-4 flex h-40 items-stretch gap-2">
+        {weeks.map(w => (
+          <div key={w.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+            <span className="text-[11px] font-bold tabular-nums text-muted-foreground">{w.rate}</span>
+            <div className={cn("w-full rounded-t", w.demo ? "bg-secondary" : w.rate > 5 ? "bg-destructive" : "bg-ok")}
+              style={{ height: `${Math.max(2, (w.rate / max) * 85)}%` }}
+              title={`${w.label}: ${w.devs} av ${w.orders} order med avvikelse${w.demo ? " (demohistorik)" : ""}`} />
+            <span className="truncate text-[11px] tabular-nums text-muted-foreground">{w.label}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">Andel plockade order med avvikelse. Sista stapeln är demons egna order, de grå är påhittad historik.</p>
+    </div>
+  )
+}
 
 export default function Admin() {
   const [user, setUser] = useState<User | null>(currentUser)
@@ -82,12 +148,13 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const products = snap.products
 
   const count = (s: Status) => orders.filter(o => o.status === s).length
-  const done = orders.filter(o => o.status === "pack" || o.status === "avv")
+  const done = orders.filter(o => o.status === "pack" || o.status === "avv" || o.status === "skickad")
   const avgMin = avg(done.map(pickTime).filter((x): x is number => x != null))
   const late = orders.filter(o => isLate(o, now))
   const active = orders.filter(o => o.status === "plock")
   const deviations = orders.flatMap(o => o.lines.filter(l => l.dev).map(l => ({ o, l, p: products[l.sku] })))
   const stock = stockRows(products, orders)
+  const refill = refillRows(stock)
   const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
 
   const pickers = [...new Set([...USERS.filter(u => u.role === "plock").map(u => u.name), ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
@@ -123,16 +190,17 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Kpi icon={<Clock className="h-4 w-4" />} label="Väntar" value={count("ny")} sub={`${orders.filter(o => o.status === "ny").reduce((n, o) => n + kolli(o), 0)} kolli`} />
           <Kpi icon={<Users className="h-4 w-4" />} label="Plockas nu" value={count("plock")} tone="warn" />
-          <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" />
+          <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" sub={`${count("skickad")} skickade`} />
           <Kpi icon={<AlertTriangle className="h-4 w-4" />} label="Avvikelser" value={count("avv")} tone={count("avv") ? "bad" : undefined} sub={`${deviations.length} ${deviations.length === 1 ? "rad" : "rader"}`} />
           <Kpi icon={<Timer className="h-4 w-4" />} label="Snitt plocktid" value={avgMin != null ? `${mins(avgMin)} min` : "–"} sub={`${done.length} klara order`} />
+          <Kpi icon={<TrendingDown className="h-4 w-4" />} label="Att fylla på" value={refill.length} tone={refill.length ? "warn" : "ok"} sub={refill.length ? `${refill.reduce((n, r) => n + r.need, 0)} st totalt` : "alla hyllor räcker"} />
           <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <Section title="Alla order" right={
             <div className="flex flex-wrap gap-1">
-              {(["alla", "plock", "ny", "avv", "pack"] as const).map(s => (
+              {(["alla", "plock", "ny", "avv", "pack", "skickad"] as const).map(s => (
                 <button key={s} onClick={() => setFilter(s)}
                   className={cn("rounded px-2 py-1 text-xs font-semibold", filter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
                   {s === "alla" ? "Alla" : STATUS[s].label}
@@ -218,6 +286,11 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         </div>
 
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="Plock per timme i dag"><HourChart moves={snap.moves} now={now} /></Section>
+          <Section title="Felrate per vecka"><WeekChart orders={orders} now={now} /></Section>
+        </div>
+
         <Section title="Avvikelser att åtgärda" right={<span className="text-sm text-muted-foreground">{deviations.length} st</span>}>
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
             {deviations.map(({ o, l, p }) => (
@@ -242,11 +315,11 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{stock.filter(r => r.short).length} räcker inte · {stock.filter(r => r.low).length} låga</span>}>
+          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{refill.length} att fylla på · {stock.filter(r => r.short).length} räcker inte</span>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                  <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-4 py-2 text-right">Min</th></tr>
+                  <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-2 py-2 text-right">Min</th><th className="px-2 py-2 text-right">Fyll på</th><th className="px-4 py-2 text-right">Räknad</th></tr>
                 </thead>
                 <tbody>
                   {stock.map(r => (
@@ -258,7 +331,9 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
                       <td className="px-2 py-2 text-right font-bold tabular-nums">{r.p.stock}</td>
                       <td className="px-2 py-2 text-right tabular-nums">{r.reserved}</td>
                       <td className={cn("px-2 py-2 text-right tabular-nums", r.short && "font-bold text-destructive")}>{r.free}</td>
-                      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{r.p.minStock}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{r.p.minStock}</td>
+                      <td className={cn("px-2 py-2 text-right tabular-nums", r.need > 0 && "font-bold text-warn")}>{r.need || "–"}</td>
+                      <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-muted-foreground">{r.p.countedAt ? new Date(r.p.countedAt).toLocaleDateString("sv-SE") : "aldrig"}</td>
                     </tr>
                   ))}
                 </tbody>
