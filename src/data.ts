@@ -1,7 +1,7 @@
 // Typer, hjälpfunktioner och demodata för lokalt läge. Allt är påhittat, inget kommer från DPJ:s system.
 
 export type ProductType = "skiva" | "stativ" | "hurts" | "stol" | "vagg" | "arm" | "ranna" | "fot"
-export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null; stock: number; minStock: number }
+export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null; stock: number; minStock: number; countedAt?: number | null }
 export interface Deviation { kind: DeviationKind; found: number; note: string; photo: string | null }
 export type DeviationKind = "Saknas" | "Skadad" | "Fel saldo"
 export interface Line { id: string; sku: string; qty: number; picked: number; locOk: boolean; dev: Deviation | null }
@@ -12,7 +12,7 @@ export interface Order {
   packer?: string | null; packedAt?: number | null; weight?: number | null
 }
 export type Products = Record<string, Product>
-export interface StockMove { id: string; sku: string; qty: number; kind: "in" | "plock" | "avvikelse"; who: string | null; note: string | null; at: number }
+export interface StockMove { id: string; sku: string; qty: number; kind: "in" | "plock" | "avvikelse" | "inventering"; who: string | null; note: string | null; at: number }
 export interface Snapshot { products: Products; orders: Order[]; moves: StockMove[] }
 
 export const DEVIATION_KINDS: DeviationKind[] = ["Saknas", "Skadad", "Fel saldo"]

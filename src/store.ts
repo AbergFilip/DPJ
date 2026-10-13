@@ -23,6 +23,7 @@ export interface Store {
   pack(orderId: string, packer: string, weight: number): Promise<boolean>
   importOrders(orders: NewOrder[]): Promise<number>
   receive(sku: string, qty: number, who: string): Promise<number | null>
+  count(sku: string, counted: number, who: string, note: string): Promise<number | null>
   reset(): Promise<void>
 }
 
@@ -80,6 +81,7 @@ function localStore(): Store {
       emit(); return fresh.length
     },
     receive: async (sku, qty, who) => run(() => ops.receive(st, sku, qty, who)),
+    count: async (sku, counted, who, note) => run(() => ops.count(st, sku, counted, who, note)),
     async reset() { st = { orders: seedOrders(), ...seedStock() }; emit() },
   }
 }
@@ -90,7 +92,7 @@ interface OrderRow {
   id: string; cust: string; ship: "exp" | "std"; ship_txt: string; due: string; status: Status; picker: string | null; started_at: string | null; done_at: string | null
   packer: string | null; packed_at: string | null; weight: number | string | null
 }
-interface ProductRow extends Omit<Product, "minStock"> { min_stock: number }
+interface ProductRow extends Omit<Product, "minStock" | "countedAt"> { min_stock: number; counted_at: string | null }
 interface MoveRow { id: number; sku: string; qty: number; kind: StockMove["kind"]; who: string | null; note: string | null; at: string }
 interface LineRow { id: number; order_id: string; sku: string; qty: number; picked: number; loc_ok: boolean; dev_kind: DeviationKind | null; dev_found: number | null; dev_note: string | null; dev_photo_url: string | null }
 
@@ -103,6 +105,7 @@ type Queued =
   | { op: "finish"; id: string; picker: string }
   | { op: "pack"; id: string; packer: string; weight: number }
   | { op: "receive"; sku: string; qty: number; who: string }
+  | { op: "count"; sku: string; counted: number; who: string; note: string }
 
 const CACHE_KEY = "dpj-plock-cache-v1"
 const QUEUE_KEY = "dpj-plock-queue-v1"
@@ -143,7 +146,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       return
     }
     setOnline(true)
-    const products = Object.fromEntries((p.data as ProductRow[]).map(({ min_stock, ...x }) => [x.sku, { ...x, minStock: min_stock }]))
+    const products = Object.fromEntries((p.data as ProductRow[]).map(({ min_stock, counted_at, ...x }) => [x.sku, { ...x, minStock: min_stock, countedAt: ts(counted_at) }]))
     const moves: StockMove[] = (m.data as MoveRow[]).map(x => ({ ...x, id: String(x.id), at: Date.parse(x.at) }))
     const byOrder = new Map<string, LineRow[]>()
     for (const r of l.data as LineRow[]) byOrder.set(r.order_id, [...(byOrder.get(r.order_id) || []), r])
@@ -189,6 +192,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       case "finish": return call("finish_order", { p_order: q.id, p_picker: q.picker })
       case "pack": return call("pack_order", { p_order: q.id, p_packer: q.packer, p_weight: q.weight })
       case "receive": return call("receive_goods", { p_sku: q.sku, p_qty: q.qty, p_who: q.who })
+      case "count": return call("count_stock", { p_sku: q.sku, p_counted: q.counted, p_who: q.who, p_note: q.note })
     }
   }
 
@@ -203,6 +207,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       case "finish": return ops.finish(st, q.id, q.picker)
       case "pack": return ops.pack(st, q.id, q.packer, q.weight)
       case "receive": return ops.receive(st, q.sku, q.qty, q.who)
+      case "count": return ops.count(st, q.sku, q.counted, q.who, q.note)
     }
   }
 
@@ -274,6 +279,7 @@ function supabaseStore(sb: SupabaseClient): Store {
     finish: (id, picker) => act({ op: "finish", id, picker }),
     pack: (id, packer, weight) => act({ op: "pack", id, packer, weight }),
     receive: (sku, qty, who) => act({ op: "receive", sku, qty, who }),
+    count: (sku, counted, who, note) => act({ op: "count", sku, counted, who, note }),
     async importOrders(list) {
       const n = await call<number>("import_orders", {
         p_orders: list.map(o => ({ id: o.id, cust: o.cust, ship: o.ship, ship_txt: o.shipTxt, due: o.due, lines: o.lines })),

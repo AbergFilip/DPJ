@@ -1,6 +1,6 @@
 // Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, Camera, Clock, PackageCheck, Timer, Truck, Users, Zap } from "lucide-react"
+import { AlertTriangle, Camera, Clock, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
@@ -9,7 +9,7 @@ import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import ImportPanel from "./ImportPanel"
-import { stockRows } from "./Lager"
+import { refillRows, stockRows } from "./Lager"
 import { Button } from "@/components/ui/button"
 
 const store = createStore()
@@ -21,7 +21,7 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
   skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
 }
-const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse" }
+const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse", inventering: "Inventering" }
 const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }
 
 const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
@@ -89,6 +89,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const active = orders.filter(o => o.status === "plock")
   const deviations = orders.flatMap(o => o.lines.filter(l => l.dev).map(l => ({ o, l, p: products[l.sku] })))
   const stock = stockRows(products, orders)
+  const refill = refillRows(stock)
   const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
 
   const pickers = [...new Set([...USERS.filter(u => u.role === "plock").map(u => u.name), ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
@@ -127,6 +128,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" sub={`${count("skickad")} skickade`} />
           <Kpi icon={<AlertTriangle className="h-4 w-4" />} label="Avvikelser" value={count("avv")} tone={count("avv") ? "bad" : undefined} sub={`${deviations.length} ${deviations.length === 1 ? "rad" : "rader"}`} />
           <Kpi icon={<Timer className="h-4 w-4" />} label="Snitt plocktid" value={avgMin != null ? `${mins(avgMin)} min` : "–"} sub={`${done.length} klara order`} />
+          <Kpi icon={<TrendingDown className="h-4 w-4" />} label="Att fylla på" value={refill.length} tone={refill.length ? "warn" : "ok"} sub={refill.length ? `${refill.reduce((n, r) => n + r.need, 0)} st totalt` : "alla hyllor räcker"} />
           <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
         </div>
 
@@ -243,11 +245,11 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{stock.filter(r => r.short).length} räcker inte · {stock.filter(r => r.low).length} låga</span>}>
+          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{refill.length} att fylla på · {stock.filter(r => r.short).length} räcker inte</span>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                  <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-4 py-2 text-right">Min</th></tr>
+                  <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-2 py-2 text-right">Min</th><th className="px-2 py-2 text-right">Fyll på</th><th className="px-4 py-2 text-right">Räknad</th></tr>
                 </thead>
                 <tbody>
                   {stock.map(r => (
@@ -259,7 +261,9 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
                       <td className="px-2 py-2 text-right font-bold tabular-nums">{r.p.stock}</td>
                       <td className="px-2 py-2 text-right tabular-nums">{r.reserved}</td>
                       <td className={cn("px-2 py-2 text-right tabular-nums", r.short && "font-bold text-destructive")}>{r.free}</td>
-                      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{r.p.minStock}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{r.p.minStock}</td>
+                      <td className={cn("px-2 py-2 text-right tabular-nums", r.need > 0 && "font-bold text-warn")}>{r.need || "–"}</td>
+                      <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-muted-foreground">{r.p.countedAt ? new Date(r.p.countedAt).toLocaleDateString("sv-SE") : "aldrig"}</td>
                     </tr>
                   ))}
                 </tbody>

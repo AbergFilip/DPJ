@@ -15,12 +15,12 @@ import { createStore, type SyncStatus } from "./store"
 import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import { Chip, Header, Pict, ScanBar } from "./parts"
-import { Inleverans, Saldo } from "./Lager"
+import { Inleverans, Inventering, Saldo, refillRows, stockRows } from "./Lager"
 import { Pack, PackingSlip } from "./Pack"
 
 const store = createStore()
 
-type Tab = "queue" | "pack" | "inleverans" | "saldo"
+type Tab = "queue" | "pack" | "inleverans" | "saldo" | "inventering"
 type View = { name: Tab } | { name: "pick" } | { name: "done" }
 // En plockrunda är plockarens pågående order (en eller flera). Varje order får en låda.
 type RoundLine = Line & { orderId: string; box: number }
@@ -75,6 +75,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [devOpen, setDevOpen] = useState(false)
   const [shakeN, setShakeN] = useState(0)
   const [slip, setSlip] = useState<Order | null>(null)
+  const [focusSku, setFocusSku] = useState<string | null>(null)
   const busy = useRef(false)
 
   const [sync, setSync] = useState<SyncStatus>({ online: true, pending: 0 })
@@ -89,6 +90,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   function say(kind: FlashKind, title: string, sub?: string, sticky?: boolean) { setFlash({ kind, title, sub, sticky, n: Date.now() }); feedback(kind) }
   const noCamera = () => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)
   const go = (v: View) => { setView(v); setSel(null); window.scrollTo(0, 0) }
+  const goSku = (t: Tab, sku: string) => { setFocusSku(sku); go({ name: t }) }
   const once = async (fn: () => Promise<void>) => {
     if (busy.current) return
     busy.current = true
@@ -139,17 +141,22 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
     <div className="min-h-full print:hidden">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
       <SyncBar sync={sync} />
-      {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => go({ name: t })} />}
+      {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => { setFocusSku(null); go({ name: t }) }} refill={refillRows(stockRows(products, orders)).length} />}
       {view.name === "inleverans" && (
-        <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera}
+        <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera} preset={focusSku}
           onReceive={(sku, qty) => store.receive(sku, qty, me)} />
+      )}
+      {view.name === "inventering" && (
+        <Inventering products={products} orders={orders} moves={snap.moves} say={say} preset={focusSku} onNoCamera={noCamera}
+          onCount={(sku, n, note) => store.count(sku, n, me, note)} onDone={() => go({ name: "saldo" })} />
       )}
       {view.name === "pack" && (
         <Pack orders={orders} products={products} me={me} say={say} onNoCamera={noCamera}
           onPack={(id, w) => store.pack(id, me, w)}
           onPrint={o => { setSlip(o); setTimeout(() => window.print(), 150) }} />
       )}
-      {view.name === "saldo" && <Saldo products={products} orders={orders} />}
+      {view.name === "saldo" && <Saldo products={products} orders={orders}
+        onRefill={sku => goSku("inleverans", sku)} onCount={sku => goSku("inventering", sku)} />}
       {view.name === "queue" && (
         <Queue orders={orders} user={user} sync={sync}
           onStart={ids => once(async () => {
@@ -258,8 +265,8 @@ function ShipBadge({ o }: { o: Order }) {
     : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />PostNord</Badge>
 }
 
-function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void }) {
-  const tabs: [Tab, string][] = [["queue", "Plock"], ["pack", "Pack"], ["inleverans", "Inleverans"], ["saldo", "Saldo"]]
+function TopBar({ user, onLogout, tab, onTab, refill }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void; refill: number }) {
+  const tabs: [Tab, string][] = [["queue", "Plock"], ["pack", "Pack"], ["inleverans", "In"], ["saldo", "Saldo"]]
   return (
     <>
       <UspStrip />
@@ -277,6 +284,7 @@ function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => vo
             <button key={t} onClick={() => onTab(t)} aria-current={tab === t ? "page" : undefined}
               className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
               {label}
+              {t === "saldo" && refill > 0 && <span className="ml-1.5 inline-grid h-5 min-w-5 place-items-center rounded-full bg-warn px-1 text-xs font-bold text-white" aria-label={`${refill} att fylla på`}>{refill}</span>}
             </button>
           ))}
         </nav>
