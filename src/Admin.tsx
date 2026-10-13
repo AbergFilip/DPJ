@@ -94,7 +94,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
     const mine = done.filter(o => o.picker === name)
     return {
       name,
-      now: active.find(o => o.picker === name),
+      now: active.filter(o => o.picker === name).map(o => o.id),
       orders: mine.length,
       kolli: mine.reduce((n, o) => n + kolli(o), 0),
       avg: avg(mine.map(pickTime).filter((x): x is number => x != null)),
@@ -205,7 +205,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
                 <tbody>
                   {pickers.map(p => (
                     <tr key={p.name} className="border-b last:border-0">
-                      <td className="px-4 py-2 font-semibold">{p.name}{p.now && <span className="block text-xs font-normal text-warn">plockar {p.now.id}</span>}</td>
+                      <td className="px-4 py-2 font-semibold">{p.name}{p.now.length > 0 && <span className="block text-xs font-normal text-warn">plockar {p.now.join(", ")}</span>}</td>
                       <td className="px-2 py-2 tabular-nums">{p.orders}</td>
                       <td className="px-2 py-2 tabular-nums">{p.kolli}</td>
                       <td className="whitespace-nowrap px-2 py-2 tabular-nums">{p.avg != null ? `${mins(p.avg)} min` : "–"}</td>

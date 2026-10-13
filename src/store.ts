@@ -9,7 +9,7 @@ import type { NewOrder } from "./csv"
 export interface Store {
   mode: "supabase" | "local"
   subscribe(cb: (s: Snapshot) => void, onError?: (msg: string) => void): () => void
-  claim(orderId: string, picker: string): Promise<boolean>
+  claimMany(orderIds: string[], picker: string): Promise<boolean>
   release(orderId: string, picker: string): Promise<void>
   confirmLocation(lineId: string, picker: string): Promise<boolean>
   pickItem(lineId: string, picker: string): Promise<number | null>
@@ -56,11 +56,12 @@ function localStore(): Store {
   return {
     mode: "local",
     subscribe(cb) { subs.add(cb); cb(snapshot()); return () => { subs.delete(cb) } },
-    async claim(id, picker) {
-      if (orders.some(o => o.status === "plock" && o.picker === picker)) return false
-      const o = orders.find(x => x.id === id)
-      if (!o || o.status !== "ny") return false
-      o.status = "plock"; o.picker = picker; o.startedAt = Date.now(); emit(); return true
+    async claimMany(ids, picker) {
+      if (!ids.length || ids.length > 4 || orders.some(o => o.status === "plock" && o.picker === picker)) return false
+      const list = ids.map(id => orders.find(x => x.id === id))
+      if (list.some(o => !o || o.status !== "ny")) return false
+      for (const o of list as Order[]) { o.status = "plock"; o.picker = picker; o.startedAt = Date.now() }
+      emit(); return true
     },
     async release(id, picker) {
       const o = orders.find(x => x.id === id)
@@ -166,7 +167,7 @@ function supabaseStore(sb: SupabaseClient): Store {
       load()
       return () => { subs.delete(cb); if (onError) errs.delete(onError) }
     },
-    claim: (id, picker) => rpc<boolean>("claim_order", { p_order: id, p_picker: picker }),
+    claimMany: (ids, picker) => rpc<boolean>("claim_orders", { p_orders: ids, p_picker: picker }),
     release: (id, picker) => rpc<void>("release_order", { p_order: id, p_picker: picker }),
     confirmLocation: (lineId, picker) => rpc<boolean>("confirm_location", { p_line: Number(lineId), p_picker: picker }),
     pickItem: (lineId, picker) => rpc<number | null>("pick_item", { p_line: Number(lineId), p_picker: picker }),

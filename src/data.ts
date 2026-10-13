@@ -59,7 +59,7 @@ export const seedOrders = (): Order[] => {
 export const lineDone = (l: Line) => l.picked >= l.qty || !!l.dev
 export const kolli = (o: Order) => o.lines.reduce((n, l) => n + l.qty, 0)
 export const mins = (ms: number) => Math.max(1, Math.round(ms / 60000))
-export const sortByLoc = (lines: Line[], products: Products) =>
+export const sortByLoc = <T extends Line>(lines: T[], products: Products) =>
   [...lines].sort((a, b) => (products[a.sku]?.loc ?? "").localeCompare(products[b.sku]?.loc ?? "", "sv", { numeric: true }))
 
 // Hur många av varje artikel som ligger i order som ännu inte är plockade.

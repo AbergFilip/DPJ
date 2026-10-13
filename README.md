@@ -42,3 +42,7 @@ ordernr;kund;frakt;klart_senast;artikelnr;antal
 ## Inleverans och saldo
 
 Varje artikel har en hyllplats och ett saldo. Under fliken Inleverans skannar man varan (en gång per styck, eller ändra antalet), och sedan hyllan för att ställa in den. Plock drar en från saldot per skannad vara. En avvikelse av typen "Saknas" eller "Fel saldo" nollar saldot, eftersom hyllan då är tom. Fliken Saldo visar saldo, hur mycket som ligger i kön och om det räcker. Översikten visar samma sak och de senaste lagerrörelserna.
+
+## Plockrunda
+
+I kön kan plockaren välja upp till fyra order med "Lägg i runda" och starta dem tillsammans. Plocklistan slår ihop alla rader i gångordning och visar för varje rad vilken låda (order) varan ska i. När allt är plockat skickas alla order till pack på en gång. Databasfunktionen `claim_orders` tar alla order eller ingen, så två plockare kan inte dela på en runda.
