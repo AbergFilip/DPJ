@@ -1,24 +1,35 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AlertTriangle, Camera, Check, ChevronLeft, Clock, Keyboard, Lock, Minus, PackageCheck, Plus, ScanLine, Truck, Zap } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { AlertTriangle, Camera, Check, ChevronLeft, Clock, Lock, Minus, PackageCheck, Plus, ScanLine, Truck, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import {
-  DEVIATION_KINDS, PICKERS, kolli, lineDone, mins, sortByLoc,
-  type DeviationKind, type Line, type Order, type ProductType, type Products, type Snapshot, type Status,
+  DEVIATION_KINDS, kolli, lineDone, mins, sortByLoc,
+  type DeviationKind, type Line, type Order, type Products, type Snapshot, type Status,
 } from "./data"
-import { createStore } from "./store"
+import { createStore, type SyncStatus } from "./store"
+import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
+import Login, { Logo } from "./Login"
+import { Chip, Header, Pict, ScanBar } from "./parts"
+import { Inleverans, Saldo } from "./Lager"
 
 const store = createStore()
-// Kameraskannern (zxing) är stor, så den laddas först när någon trycker på kameraknappen.
-const CameraScanner = lazy(() => import("./CameraScanner"))
 
-type View = { name: "queue" } | { name: "pick"; id: string } | { name: "done"; id: string }
+type Tab = "queue" | "inleverans" | "saldo"
+type View = { name: Tab } | { name: "pick" } | { name: "done" }
+// En plockrunda är plockarens pågående order (en eller flera). Varje order får en låda.
+type RoundLine = Line & { orderId: string; box: number }
+interface Round { orders: Order[]; lines: RoundLine[] }
+const MAX_ROUND = 4
+
+function roundOf(orders: Order[], me: string): Round {
+  const mine = orders.filter(o => o.status === "plock" && o.picker === me).sort((a, b) => a.id.localeCompare(b.id))
+  return { orders: mine, lines: mine.flatMap((o, k) => o.lines.map(l => ({ ...l, orderId: o.id, box: k + 1 }))) }
+}
 type FlashKind = "ok" | "err" | "warn"
 interface Flash { kind: FlashKind; title: string; sub?: string; sticky?: boolean; n: number }
 
@@ -27,31 +38,6 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
-}
-
-const ICON: Record<ProductType, string> = {
-  skiva: '<path d="M4 22 L30 14 L44 20 L18 28 Z"/><path d="M4 22 v4 L18 32 v-4 M18 32 L44 24 v-4"/>',
-  stativ: '<path d="M8 12 H40 M14 12 V36 M34 12 V36 M8 36 H20 M28 36 H40"/>',
-  hurts: '<rect x="12" y="6" width="24" height="34" rx="2"/><path d="M12 17 H36 M12 28 H36 M21 11.5 h6 M21 22.5 h6 M21 33.5 h6"/>',
-  stol: '<path d="M16 6 h16 v16 H16 Z M12 26 H36 M24 26 V36 M14 42 L24 36 L34 42"/>',
-  vagg: '<rect x="6" y="10" width="36" height="20" rx="3"/><path d="M14 30 v8 M34 30 v8 M10 38 h8 M30 38 h8"/>',
-  arm: '<rect x="4" y="8" width="16" height="11" rx="1"/><rect x="28" y="8" width="16" height="11" rx="1"/><path d="M12 19 L24 26 L36 19 M24 26 V42 M18 42 H30"/>',
-  ranna: '<path d="M4 18 L4 28 L44 28 L44 18 M4 28 L10 32 L44 32 L44 28"/>',
-  fot: '<path d="M6 32 L40 22 L42 28 L8 38 Z M14 36 v4 M34 26 v8"/>',
-}
-const Pict = ({ type, className }: { type: ProductType; className?: string }) => (
-  <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-    className={className} dangerouslySetInnerHTML={{ __html: ICON[type] ?? "" }} aria-hidden="true" />
-)
-
-function Logo() {
-  // Ordbild i DPJ:s grå logofärg. Byt mot DPJ:s riktiga SVG-logga inför en skarp demo.
-  return (
-    <div className="flex select-none items-baseline gap-1.5 text-logo" aria-label="DPJ Workspace">
-      <span className="text-[26px] font-extrabold leading-none tracking-[-0.02em]">DPJ</span>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.28em]">Workspace</span>
-    </div>
-  )
 }
 
 let actx: AudioContext | undefined
@@ -67,17 +53,20 @@ function feedback(kind: FlashKind) {
   } catch { /* ok */ }
 }
 
-const loadMe = () => { try { return localStorage.getItem("dpj-plock-me") || PICKERS[0] } catch { return PICKERS[0] } }
-
-function currentLine(o: Order, products: Products, sel: number | null) {
-  const lines = sortByLoc(o.lines, products)
+function currentLine(r: Round, products: Products, sel: number | null) {
+  const lines = sortByLoc(r.lines, products)
   const i = sel != null && lines[sel] && !lineDone(lines[sel]) ? sel : lines.findIndex(l => !lineDone(l))
-  return { lines, i, line: i >= 0 ? lines[i] : undefined as Line | undefined }
+  return { lines, i, line: i >= 0 ? lines[i] : undefined as RoundLine | undefined }
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(currentUser)
+  return user ? <Picking user={user} onLogout={() => { logout(); setUser(null) }} /> : <Login onLogin={setUser} />
+}
+
+function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const me = user.name
   const [snap, setSnap] = useState<Snapshot | null>(null)
-  const [me, setMeState] = useState(loadMe)
   const [view, setView] = useState<View>({ name: "queue" })
   const [sel, setSel] = useState<number | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -85,15 +74,17 @@ export default function App() {
   const [shakeN, setShakeN] = useState(0)
   const busy = useRef(false)
 
-  useEffect(() => store.subscribe(setSnap, msg => say("err", "Kunde inte nå databasen", msg, true)), [])
+  const [sync, setSync] = useState<SyncStatus>({ online: true, pending: 0 })
+  useEffect(() => store.subscribe(setSnap, msg => say("err", "Något gick inte att spara", msg, true)), [])
+  useEffect(() => store.onStatus(setSync), [])
   useEffect(() => {
     if (!flash || flash.sticky) return
     const t = setTimeout(() => setFlash(null), 1700)
     return () => clearTimeout(t)
   }, [flash])
 
-  const setMe = (m: string) => { setMeState(m); try { localStorage.setItem("dpj-plock-me", m) } catch { /* ok */ } }
   function say(kind: FlashKind, title: string, sub?: string, sticky?: boolean) { setFlash({ kind, title, sub, sticky, n: Date.now() }); feedback(kind) }
+  const noCamera = () => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)
   const go = (v: View) => { setView(v); setSel(null); window.scrollTo(0, 0) }
   const once = async (fn: () => Promise<void>) => {
     if (busy.current) return
@@ -103,13 +94,13 @@ export default function App() {
 
   if (!snap) return <div className="grid min-h-screen place-items-center text-muted-foreground">Hämtar order…</div>
   const { products, orders } = snap
-  const order = view.name !== "queue" ? orders.find(o => o.id === view.id) : undefined
+  const round = roundOf(orders, me)
+  const tab = view.name === "pick" || view.name === "done" ? null : view.name
 
   async function handleScan(raw: string) {
-    if (!order) return
     const code = raw.trim().toUpperCase()
     if (!code) return
-    const { line: l } = currentLine(order, products, sel)
+    const { line: l } = currentLine(round, products, sel)
     if (!l) return
     const p = products[l.sku]
     const byEan = Object.values(products).find(q => q.ean === code)
@@ -129,9 +120,10 @@ export default function App() {
         if (n == null) return
         if (n >= l.qty) {
           setSel(null)
-          const next = currentLine({ ...order, lines: order.lines.map(x => x.id === l.id ? { ...x, picked: n } : x) }, products, null).line
-          say("ok", `Rad klar: ${l.qty} st`, next ? `Nästa: ${products[next.sku].loc}` : "Alla rader plockade.")
-        } else say("ok", `${n} av ${l.qty}`, `Skanna ${l.qty - n} till.`)
+          const next = currentLine({ ...round, lines: round.lines.map(x => x.id === l.id ? { ...x, picked: n } : x) }, products, null).line
+          const box = round.orders.length > 1 ? ` i låda ${l.box}` : ""
+          say("ok", `Rad klar: ${l.qty} st${box}`, next ? `Nästa: ${products[next.sku].loc}` : "Alla rader plockade.")
+        } else say("ok", `${n} av ${l.qty}`, round.orders.length > 1 ? `Låda ${l.box}. Skanna ${l.qty - n} till.` : `Skanna ${l.qty - n} till.`)
       })
     } else if (byEan) {
       say("err", "Fel vara, lägg tillbaka", `Du skannade ${byEan.name}, ${byEan.variant}. Ska vara ${p.variant}.`, true); bump()
@@ -142,41 +134,53 @@ export default function App() {
   return (
     <div className="min-h-full">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
+      <SyncBar sync={sync} />
+      {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => go({ name: t })} />}
+      {view.name === "inleverans" && (
+        <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera}
+          onReceive={(sku, qty) => store.receive(sku, qty, me)} />
+      )}
+      {view.name === "saldo" && <Saldo products={products} orders={orders} />}
       {view.name === "queue" && (
-        <Queue orders={orders} me={me} setMe={setMe}
-          onStart={id => once(async () => {
-            if (await store.claim(id, me)) go({ name: "pick", id })
-            else say("warn", "Ordern är redan tagen", "Någon annan hann före, eller så har du en order igång.")
+        <Queue orders={orders} user={user} sync={sync}
+          onStart={ids => once(async () => {
+            if (await store.claimMany(ids, me)) go({ name: "pick" })
+            else say("warn", ids.length > 1 ? "Någon order är redan tagen" : "Ordern är redan tagen", "Någon annan hann före, eller så har du en runda igång.")
           })}
-          onOpen={id => go({ name: "pick", id })}
+          onOpen={() => go({ name: "pick" })}
           onReset={() => once(async () => { await store.reset(); say("ok", "Demodata återställd") })} />
       )}
-      {view.name !== "queue" && !order && <p className="p-6 text-muted-foreground">Ordern finns inte längre. <button className="underline" onClick={() => go({ name: "queue" })}>Till kön</button></p>}
-      {view.name === "pick" && order && (
+      {(view.name === "pick" || view.name === "done") && !round.orders.length && <p className="p-6 text-muted-foreground">Du har ingen order igång. <button className="underline" onClick={() => go({ name: "queue" })}>Till kön</button></p>}
+      {view.name === "pick" && round.orders.length > 0 && (
         <>
-          <Pick o={order} products={products} sel={sel} setSel={setSel} shakeN={shakeN}
+          <Pick r={round} products={products} sel={sel} setSel={setSel} shakeN={shakeN}
             onBack={() => go({ name: "queue" })}
             onScan={handleScan}
-            onNoCamera={() => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)}
+            onNoCamera={noCamera}
             onDeviation={() => setDevOpen(true)}
-            onFinish={() => go({ name: "done", id: order.id })}
-            onRelease={() => once(async () => { await store.release(order.id, me); say("ok", `#${order.id} släppt`, "Ordern ligger i kön igen."); go({ name: "queue" }) })} />
-          <DeviationSheet open={devOpen} onOpenChange={setDevOpen} line={currentLine(order, products, sel).line} products={products}
+            onFinish={() => go({ name: "done" })}
+            onRelease={() => once(async () => {
+              for (const o of round.orders) await store.release(o.id, me)
+              say("ok", round.orders.length > 1 ? `${round.orders.length} order släppta` : `#${round.orders[0].id} släppt`, "Orderna ligger i kön igen."); go({ name: "queue" })
+            })} />
+          <DeviationSheet open={devOpen} onOpenChange={setDevOpen} line={currentLine(round, products, sel).line} products={products}
             onSave={(kind, found, note, photo) => once(async () => {
-              const l = currentLine(order, products, sel).line
+              const l = currentLine(round, products, sel).line
               if (!l) return
               await store.reportDeviation(l.id, me, kind, found, note, photo)
               setSel(null); setDevOpen(false)
-              say("warn", `Raden flaggad: ${kind}`, "Ordern markeras med avvikelse.")
+              say("warn", `Raden flaggad: ${kind}`, `Order #${l.orderId} markeras med avvikelse.`)
             })} />
         </>
       )}
-      {view.name === "done" && order && (
-        <Done o={order} products={products} onBack={() => setView({ name: "pick", id: order.id })}
+      {view.name === "done" && round.orders.length > 0 && (
+        <Done r={round} products={products} onBack={() => setView({ name: "pick" })}
           onSend={() => once(async () => {
-            const s = await store.finish(order.id, me)
-            if (!s) { say("warn", "Ordern kunde inte skickas", "Kontrollera att alla rader är klara."); return }
-            say("ok", `#${order.id} skickad till pack`, s === "avv" ? "Avvikelsen syns för pack och inköp." : "Bra jobbat.")
+            const res = []
+            for (const o of round.orders) res.push(await store.finish(o.id, me))
+            if (res.some(x => !x)) { say("warn", "Någon order kunde inte skickas", "Kontrollera att alla rader är klara."); return }
+            const n = res.length
+            say("ok", n > 1 ? `${n} order skickade till pack` : `#${round.orders[0].id} skickad till pack`, res.includes("avv") ? "Avvikelsen syns för pack och inköp." : "Bra jobbat.")
             go({ name: "queue" })
           })} />
       )}
@@ -185,6 +189,17 @@ export default function App() {
 }
 
 /* ---------- Delar ---------- */
+
+function SyncBar({ sync }: { sync: SyncStatus }) {
+  if (sync.online && !sync.pending) return null
+  return (
+    <div role="status" className={cn("px-4 py-2 text-center text-[13px] font-semibold", sync.online ? "bg-secondary text-secondary-foreground" : "bg-warn-soft text-warn")}>
+      {sync.online
+        ? `Skickar ${sync.pending} ändringar som gjordes utan nät…`
+        : `Ingen täckning. Plocket sparas i mobilen${sync.pending ? ` (${sync.pending} väntar)` : ""} och skickas när nätet är tillbaka.`}
+    </div>
+  )
+}
 
 function UspStrip() {
   const items = ["Lagervaror skickas inom 24h", "Express före kl. 12", "Varje kolli skannas"]
@@ -198,14 +213,6 @@ function UspStrip() {
         ))}
       </div>
     </div>
-  )
-}
-
-function Header({ children }: { children: ReactNode }) {
-  return (
-    <header className="sticky top-[env(safe-area-inset-top,0px)] z-30 border-b bg-header">
-      <div className="mx-auto flex max-w-xl items-center gap-3 px-4 py-3">{children}</div>
-    </header>
   )
 }
 
@@ -240,15 +247,46 @@ function ShipBadge({ o }: { o: Order }) {
     : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />PostNord</Badge>
 }
 
+function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void }) {
+  const tabs: [Tab, string][] = [["queue", "Plock"], ["inleverans", "Inleverans"], ["saldo", "Saldo"]]
+  return (
+    <>
+      <UspStrip />
+      <header className="sticky top-[env(safe-area-inset-top,0px)] z-30 border-b bg-header">
+        <div className="mx-auto flex max-w-xl items-center gap-3 px-4 pt-3">
+          <Logo />
+          <div className="flex-1" />
+          <div className="text-right leading-tight">
+            <div className="font-semibold">{user.name}</div>
+            <button className="text-xs text-muted-foreground underline" onClick={onLogout}>Logga ut</button>
+          </div>
+        </div>
+        <nav className="mx-auto mt-2 flex max-w-xl px-2" aria-label="Meny">
+          {tabs.map(([t, label]) => (
+            <button key={t} onClick={() => onTab(t)} aria-current={tab === t ? "page" : undefined}
+              className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
+    </>
+  )
+}
+
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
-  orders: Order[]; me: string; setMe: (m: string) => void; onStart: (id: string) => void; onOpen: (id: string) => void; onReset: () => void
+function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
+  orders: Order[]; user: User; sync: SyncStatus; onStart: (ids: string[]) => void; onOpen: () => void; onReset: () => void
 }) {
+  const me = user.name
+  const [picked, setPicked] = useState<string[]>([])
   const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
   const list = [...orders].sort((a, b) => rank(a) - rank(b) || a.due.localeCompare(b.due))
   const cnt = (k: Status) => orders.filter(o => o.status === k).length
   const active = orders.find(o => o.status === "plock" && o.picker === me)
+  const chosen = picked.filter(id => orders.some(o => o.id === id && o.status === "ny"))
+  const toggle = (id: string) => setPicked(chosen.includes(id) ? chosen.filter(x => x !== id) : [...chosen, id].slice(0, MAX_ROUND))
   const groups: [string, Order[]][] = [
     ["Pågår", list.filter(o => o.status === "plock")],
     ["Orderkö i dag", list.filter(o => o.status === "ny")],
@@ -256,22 +294,14 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
   ]
   return (
     <>
-      <UspStrip />
-      <Header>
-        <Logo />
-        <span className="ml-1 rounded bg-primary px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary-foreground">Plock</span>
-        <div className="flex-1" />
-        <Select value={me} onValueChange={setMe}>
-          <SelectTrigger className="h-9 w-[118px] font-semibold" aria-label="Plockare"><SelectValue /></SelectTrigger>
-          <SelectContent>{PICKERS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-        </Select>
-      </Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-5 flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Hej {me}!</h1>
-          <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold", store.mode === "supabase" ? "text-ok" : "text-muted-foreground")}>
-            <span className={cn("h-2 w-2 rounded-full", store.mode === "supabase" ? "bg-ok" : "bg-muted-foreground")} />
-            {store.mode === "supabase" ? "Live, delas med alla" : "Lokal demo"}
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ROLE_LABEL[user.role]}</span>
+          <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold",
+            store.mode === "local" ? "text-muted-foreground" : sync.online ? "text-ok" : "text-warn")}>
+            <span className={cn("h-2 w-2 rounded-full", store.mode === "local" ? "bg-muted-foreground" : sync.online ? "bg-ok" : "bg-warn")} />
+            {store.mode === "local" ? "Lokal demo" : sync.online ? "Live, delas med alla" : "Utan nät"}
           </span>
         </div>
         <p className="text-muted-foreground">{cnt("ny")} order väntar på plock i dag.</p>
@@ -290,11 +320,19 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
               {items.map(o => {
                 const mine = o.status === "plock" && o.picker === me
                 const doneRows = o.lines.filter(lineDone).length
+                const on = chosen.includes(o.id)
                 return (
-                  <article key={o.id} className={cn("rounded-md border bg-card p-3.5", mine && "border-primary ring-1 ring-primary")}>
+                  <article key={o.id} className={cn("rounded-md border bg-card p-3.5", (mine || on) && "border-primary ring-1 ring-primary")}>
                     <div className="flex flex-wrap items-center gap-2">
                       <ShipBadge o={o} />
                       <span className="font-mono text-[13px] text-muted-foreground">#{o.id}</span>
+                      {o.status === "ny" && !active && (
+                        <button onClick={() => toggle(o.id)} aria-pressed={on} disabled={!on && chosen.length >= MAX_ROUND}
+                          className={cn("ml-auto flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold disabled:opacity-40",
+                            on ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground")}>
+                          {on ? <><Check className="h-3.5 w-3.5" strokeWidth={3} />Låda {[...chosen].sort((a, b) => a.localeCompare(b)).indexOf(o.id) + 1}</> : "Lägg i runda"}
+                        </button>
+                      )}
                     </div>
                     <div className="mt-1.5 font-semibold text-card-foreground">{o.cust}</div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
@@ -305,8 +343,8 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
                     <div className="mt-3 flex items-center gap-2">
                       <Pill s={o.status} />
                       <div className="flex-1" />
-                      {o.status === "ny" && <Button className="h-11 px-5 text-[15px] font-bold" disabled={!!active} onClick={() => onStart(o.id)}>Starta plock</Button>}
-                      {mine && <Button className="h-11 px-5 text-[15px] font-bold" onClick={() => onOpen(o.id)}>Fortsätt</Button>}
+                      {o.status === "ny" && !chosen.length && <Button className="h-11 px-5 text-[15px] font-bold" disabled={!!active} onClick={() => onStart([o.id])}>Starta plock</Button>}
+                      {mine && <Button className="h-11 px-5 text-[15px] font-bold" onClick={onOpen}>Fortsätt</Button>}
                       {o.status === "plock" && !mine && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Lock className="h-3.5 w-3.5" />Låst av {o.picker}</span>}
                       {(o.status === "pack" || o.status === "avv") && o.doneAt && o.startedAt && <span className="text-sm text-muted-foreground">{o.picker} · {mins(o.doneAt - o.startedAt)} min</span>}
                     </div>
@@ -316,28 +354,46 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
             </div>
           </section>
         ))}
-        {active && <p className="mt-4 text-sm text-muted-foreground">Du har en order igång. Avsluta eller släpp den innan du tar nästa.</p>}
+        {active && <p className="mt-4 text-sm text-muted-foreground">Du har en runda igång. Avsluta eller släpp den innan du tar nästa.</p>}
+        {!active && !chosen.length && cnt("ny") > 1 && <p className="mt-4 text-sm text-muted-foreground">Tips: välj upp till {MAX_ROUND} order med "Lägg i runda" och plocka dem i samma vända, en låda per order.</p>}
         <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">Demo med påhittade order och artiklar. Inget här kommer från DPJ:s system.</p>
-        <div className="mt-3 text-center"><button className="text-sm text-muted-foreground underline" onClick={onReset}>Återställ demodata</button></div>
+        <div className="mt-3 flex justify-center gap-5">
+          <a className="text-sm text-muted-foreground underline" href="/etiketter.html">Streckkoder för demo</a>
+          {user.role === "ledare" && <a className="text-sm text-muted-foreground underline" href="/admin.html">Översikt</a>}
+          <button className="text-sm text-muted-foreground underline" onClick={onReset}>Återställ demodata</button>
+        </div>
       </main>
+      {chosen.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-card px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
+          <div className="mx-auto flex max-w-xl items-center gap-3">
+            <div className="min-w-0 flex-1 text-sm leading-tight">
+              <div className="font-bold">{chosen.length} order i rundan</div>
+              <div className="text-muted-foreground">{chosen.reduce((n, id) => n + kolli(orders.find(o => o.id === id)!), 0)} kolli · <button className="underline" onClick={() => setPicked([])}>Rensa</button></div>
+            </div>
+            <Button className="h-12 px-5 text-[15px] font-bold" onClick={() => onStart(chosen)}>Starta plockrunda</Button>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
 /* ---------- Plock ---------- */
 
-function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, onDeviation, onFinish, onRelease }: {
-  o: Order; products: Products; sel: number | null; setSel: (n: number | null) => void; shakeN: number
+const BOX = ["", "bg-sky-200 text-sky-950", "bg-amber-200 text-amber-950", "bg-emerald-200 text-emerald-950", "bg-rose-200 text-rose-950"]
+const Box = ({ n, className }: { n: number; className?: string }) =>
+  <span className={cn("inline-grid h-6 min-w-6 place-items-center rounded px-1 text-xs font-extrabold", BOX[n], className)} aria-label={`Låda ${n}`}>{n}</span>
+
+function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, onDeviation, onFinish, onRelease }: {
+  r: Round; products: Products; sel: number | null; setSel: (n: number | null) => void; shakeN: number
   onBack: () => void; onScan: (c: string) => void; onNoCamera: () => void; onDeviation: () => void; onFinish: () => void; onRelease: () => void
 }) {
-  const { lines, i, line } = currentLine(o, products, sel)
+  const { lines, i, line } = currentLine(r, products, sel)
+  const multi = r.orders.length > 1
+  const o = r.orders[0]
+  const lineOrder = line && r.orders.find(x => x.id === line.orderId)
   const done = lines.filter(lineDone).length
-  const [code, setCode] = useState("")
-  const [typing, setTyping] = useState(false)
-  const [camera, setCamera] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const curRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (!camera) inputRef.current?.focus({ preventScroll: true }) }, [i, line?.locOk, line?.picked, camera])
   useEffect(() => {
     const c = curRef.current; if (!c || !shakeN) return
     c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake")
@@ -357,14 +413,23 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
         <Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />Kö</Button>
         <div className="flex-1" />
         <div className="min-w-0 text-right">
-          <div className="font-mono text-sm">#{o.id}</div>
-          <div className="truncate text-[13px] text-muted-foreground">{o.cust}</div>
+          {multi ? (
+            <>
+              <div className="text-sm font-bold">Plockrunda, {r.orders.length} order</div>
+              <div className="truncate font-mono text-[13px] text-muted-foreground">{r.orders.map(x => `#${x.id}`).join(" ")}</div>
+            </>
+          ) : (
+            <>
+              <div className="font-mono text-sm">#{o.id}</div>
+              <div className="truncate text-[13px] text-muted-foreground">{o.cust}</div>
+            </>
+          )}
         </div>
       </Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-4 flex justify-between text-sm tabular-nums text-muted-foreground">
           <span>{done} av {lines.length} rader</span>
-          <span className="flex items-center gap-1.5"><ShipBadge o={o} />ut {o.due}</span>
+          {(() => { const first = [...r.orders].sort((a, b) => a.due.localeCompare(b.due))[0]; return <span className="flex items-center gap-1.5"><ShipBadge o={first} />ut {first.due}</span> })()}
         </div>
         <Progress value={done / Math.max(1, lines.length) * 100} className="mt-2 h-2 bg-secondary [&>div]:bg-ok" />
 
@@ -383,6 +448,12 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
                   <div className="text-[46px] font-extrabold leading-none tabular-nums">{line.qty}</div>
                 </div>
               </div>
+              {multi && lineOrder && (
+                <div className={cn("flex items-center gap-3 px-4 py-2", BOX[line.box])}>
+                  <span className="whitespace-nowrap text-2xl font-extrabold">Lägg i låda {line.box}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-sm font-semibold">#{lineOrder.id}<span className="block truncate font-normal">{lineOrder.cust}</span></span>
+                </div>
+              )}
               <div className="flex items-center gap-3.5 px-4 py-3.5">
                 <div className="grid h-16 w-16 shrink-0 place-items-center rounded bg-muted text-muted-foreground"><Pict type={p.type} className="h-11 w-11" /></div>
                 <div className="min-w-0">
@@ -390,6 +461,7 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
                   <div className="text-lg font-bold leading-tight text-card-foreground">{p.name}</div>
                   <div className="mt-1"><span className="rounded bg-accent px-1.5 py-0.5 text-[16px] font-bold text-accent-foreground">{p.variant}</span></div>
                   <div className="mt-1.5 break-all font-mono text-xs text-muted-foreground">{line.sku} · EAN {p.ean}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">Saldo på hyllan: {p.stock} st</div>
                 </div>
               </div>
               <div className="grid grid-cols-2 border-t text-sm">
@@ -405,18 +477,8 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
               </div>
             </div>
 
-            <form className="mt-3 flex gap-2" autoComplete="off" onSubmit={e => { e.preventDefault(); onScan(code); setCode("") }}>
-              <div className="relative min-w-0 flex-1">
-                <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                <input ref={inputRef} id="scan" value={code} onChange={e => setCode(e.target.value)} inputMode={typing ? "text" : "none"}
-                  placeholder={step === 1 ? "Skanna hylletikett" : "Skanna varans streckkod"} aria-label="Skannad kod"
-                  className="h-12 w-full rounded-md border-2 border-dashed border-input bg-card pl-10 pr-3 font-mono text-base text-card-foreground outline-none focus:border-solid focus:border-ring" />
-              </div>
-              {!!navigator.mediaDevices?.getUserMedia && (
-                <Button type="button" className="h-12 px-4" onClick={() => setCamera(true)} aria-label="Skanna med kameran"><Camera className="!h-5 !w-5" /></Button>
-              )}
-              <Button type="button" variant="outline" className="h-12" aria-label="Skriv in kod" onClick={() => { setTyping(true); setTimeout(() => inputRef.current?.focus(), 0) }}><Keyboard className="!h-5 !w-5" /></Button>
-            </form>
+            <ScanBar placeholder={step === 1 ? "Skanna hylletikett" : "Skanna varans streckkod"} onScan={onScan} onNoCamera={onNoCamera}
+              hint={step === 1 ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} focusKey={`${i}-${line.locOk}-${line.picked}`} />
 
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               <span className="text-[13px] text-muted-foreground">Testa:</span>
@@ -454,9 +516,9 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
             const q = products[l.sku]; const isDone = lineDone(l)
             return (
               <button key={l.id} disabled={isDone} onClick={() => { setSel(k); window.scrollTo({ top: 0, behavior: "smooth" }) }}
-                className={cn("grid w-full grid-cols-[72px_1fr_auto] items-center gap-2.5 border-t px-3 py-2.5 text-left first:border-t-0",
+                className={cn("grid w-full items-center gap-2.5 border-t px-3 py-2.5 text-left first:border-t-0", multi ? "grid-cols-[98px_1fr_auto]" : "grid-cols-[72px_1fr_auto]",
                   k === i && "bg-warn-soft", isDone && "opacity-60")}>
-                <span className={cn("text-lg font-extrabold tabular-nums", isDone && "line-through")}>{q?.loc}</span>
+                <span className={cn("flex items-center gap-1.5 text-lg font-extrabold tabular-nums", isDone && "line-through")}>{multi && <Box n={l.box} />}{q?.loc}</span>
                 <span className="min-w-0 text-sm">
                   <span className="block truncate font-semibold">{q?.name}</span>
                   <span className="block truncate text-muted-foreground">{q?.variant}</span>
@@ -468,18 +530,9 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
             )
           })}
         </div>
-        {line && <div className="mt-6 text-center"><button className="text-sm text-muted-foreground underline" onClick={onRelease}>Släpp ordern tillbaka till kön</button></div>}
+        {line && <div className="mt-6 text-center"><button className="text-sm text-muted-foreground underline" onClick={onRelease}>{multi ? "Släpp rundan tillbaka till kön" : "Släpp ordern tillbaka till kön"}</button></div>}
       </main>
-      {camera && <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}><CameraScanner onClose={() => setCamera(false)} onFail={() => { setCamera(false); onNoCamera() }}
-        onCode={c => { setCamera(false); onScan(c) }} hint={step === 1 ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} /></Suspense>}
     </>
-  )
-}
-
-function Chip({ children, bad, onClick }: { children: ReactNode; bad?: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 text-sm font-semibold",
-      bad ? "border-destructive text-destructive" : "text-card-foreground")}>{children}</button>
   )
 }
 
@@ -554,13 +607,15 @@ function DeviationSheet({ open, onOpenChange, line, products, onSave }: {
 
 /* ---------- Klar ---------- */
 
-function Done({ o, products, onBack, onSend }: { o: Order; products: Products; onBack: () => void; onSend: () => void }) {
-  const devs = o.lines.filter(l => l.dev)
+function Done({ r, products, onBack, onSend }: { r: Round; products: Products; onBack: () => void; onSend: () => void }) {
+  const multi = r.orders.length > 1
+  const devs = r.lines.filter(l => l.dev)
+  const start = Math.min(...r.orders.map(o => o.startedAt || Date.now()))
   const rows: [string, string][] = [
-    ["Order", `#${o.id}`], ["Kund", o.cust],
-    ["Kolli plockade", `${o.lines.reduce((n, l) => n + l.picked, 0)} av ${kolli(o)}`],
-    ["Plockare", o.picker || ""], ["Tid", `${mins(Date.now() - (o.startedAt || Date.now()))} min`],
-    ["Leverans", `${o.shipTxt}, ut ${o.due}`],
+    ...(multi ? [] : [["Order", `#${r.orders[0].id}`], ["Kund", r.orders[0].cust]] as [string, string][]),
+    ["Kolli plockade", `${r.lines.reduce((n, l) => n + l.picked, 0)} av ${r.orders.reduce((n, o) => n + kolli(o), 0)}`],
+    ["Plockare", r.orders[0].picker || ""], ["Tid", `${mins(Date.now() - start)} min`],
+    ...(multi ? [] : [["Leverans", `${r.orders[0].shipTxt}, ut ${r.orders[0].due}`]] as [string, string][]),
   ]
   return (
     <>
@@ -570,16 +625,27 @@ function Done({ o, products, onBack, onSend }: { o: Order; products: Products; o
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border bg-card p-4 tabular-nums">
           {rows.map(([k, v]) => (<Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="m-0 text-right font-semibold">{v}</dd></Fragment>))}
         </dl>
+        {multi && (
+          <div className="mt-3 overflow-hidden rounded-md border bg-card">
+            {r.orders.map((o, k) => (
+              <div key={o.id} className="flex items-center gap-3 border-t px-4 py-2.5 text-sm first:border-t-0">
+                <Box n={k + 1} />
+                <span className="min-w-0 flex-1"><b className="font-mono">#{o.id}</b> {o.cust}<span className="block text-muted-foreground">{o.shipTxt}, ut {o.due}</span></span>
+                <span className={cn("font-semibold tabular-nums", o.lines.some(l => l.dev) && "text-destructive")}>{o.lines.reduce((n, l) => n + l.picked, 0)}/{kolli(o)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {devs.length > 0 && (
           <div className="mt-3 grid gap-2">
             {devs.map(l => { const p = products[l.sku]; return (
               <div key={l.id} className="flex items-center gap-3 rounded-md bg-bad-soft p-3 text-sm">
                 {l.dev!.photo && <img src={l.dev!.photo} alt="" className="h-14 w-14 rounded object-cover" />}
-                <div><b className="text-destructive">{l.dev!.kind}</b> · {p.loc} · {p.name}, {p.variant}<br />Hittade {l.dev!.found} av {l.qty}{l.dev!.note && ` · ${l.dev!.note}`}</div>
+                <div><b className="text-destructive">{l.dev!.kind}</b> · {multi && `#${l.orderId} · `}{p.loc} · {p.name}, {p.variant}<br />Hittade {l.dev!.found} av {l.qty}{l.dev!.note && ` · ${l.dev!.note}`}</div>
               </div>) })}
           </div>
         )}
-        <Button className="mt-5 h-12 w-full bg-ok text-base font-bold text-white hover:bg-ok/90" onClick={onSend}>Skicka till pack</Button>
+        <Button className="mt-5 h-12 w-full bg-ok text-base font-bold text-white hover:bg-ok/90" onClick={onSend}>{multi ? `Skicka ${r.orders.length} order till pack` : "Skicka till pack"}</Button>
       </main>
     </>
   )

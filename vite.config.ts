@@ -33,4 +33,9 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  build: {
+    rollupOptions: {
+      input: { main: path.resolve(__dirname, "index.html"), etiketter: path.resolve(__dirname, "etiketter.html"), admin: path.resolve(__dirname, "admin.html") },
+    },
+  },
 })

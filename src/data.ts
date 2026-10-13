@@ -1,7 +1,7 @@
 // Typer, hjälpfunktioner och demodata för lokalt läge. Allt är påhittat, inget kommer från DPJ:s system.
 
 export type ProductType = "skiva" | "stativ" | "hurts" | "stol" | "vagg" | "arm" | "ranna" | "fot"
-export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null }
+export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null; stock: number; minStock: number }
 export interface Deviation { kind: DeviationKind; found: number; note: string; photo: string | null }
 export type DeviationKind = "Saknas" | "Skadad" | "Fel saldo"
 export interface Line { id: string; sku: string; qty: number; picked: number; locOk: boolean; dev: Deviation | null }
@@ -11,26 +11,26 @@ export interface Order {
   lines: Line[]; picker?: string | null; startedAt?: number | null; doneAt?: number | null
 }
 export type Products = Record<string, Product>
-export interface Snapshot { products: Products; orders: Order[] }
+export interface StockMove { id: string; sku: string; qty: number; kind: "in" | "plock" | "avvikelse"; who: string | null; note: string | null; at: number }
+export interface Snapshot { products: Products; orders: Order[]; moves: StockMove[] }
 
-export const PICKERS = ["Sara", "Amir", "Jonna", "Mikael"]
 export const DEVIATION_KINDS: DeviationKind[] = ["Saknas", "Skadad", "Fel saldo"]
 
-const P = (sku: string, name: string, variant: string, ean: string, loc: string, type: ProductType, brand?: string): Product =>
-  ({ sku, name, variant, ean, loc, type, brand })
+const P = (sku: string, name: string, variant: string, ean: string, loc: string, type: ProductType, brand: string | undefined, stock: number, minStock: number): Product =>
+  ({ sku, name, variant, ean, loc, type, brand, stock, minStock })
 
 export const SEED_PRODUCTS: Products = Object.fromEntries([
-  P("BRZ-SK-1680-VI", "Bordsskiva Professional", "160×80 cm, vit", "7340001216801", "A-03-2", "skiva", "Brizley"),
-  P("BRZ-SK-1680-EK", "Bordsskiva Professional", "160×80 cm, ek", "7340001216818", "A-03-3", "skiva", "Brizley"),
-  P("BRZ-SK-1890-AN", "Bordsskiva Professional", "180×90 cm, antracit", "7340001218904", "A-05-1", "skiva", "Brizley"),
-  P("BRZ-ST-EL2-SV", "Elstativ Professional, 2 motorer", "svart, för 160–180 cm", "7340001302214", "B-02-1", "stativ", "Brizley"),
-  P("BRZ-ST-EL2-VI", "Elstativ Professional, 2 motorer", "vit, för 160–180 cm", "7340001302221", "B-02-2", "stativ", "Brizley"),
-  P("HU-3L-VI", "Hurts 3 lådor, låsbar", "vit", "7340001455101", "C-06-2", "hurts"),
-  P("KS-ERGO-SV", "Kontorsstol Ergo Plus", "svart tyg", "7340001501209", "C-11-1", "stol"),
-  P("SV-160-GR", "Skärmvägg bordsmonterad", "160 cm, grå filt", "7340001604306", "D-04-3", "vagg"),
-  P("MA-DUO-SV", "Skärmarm dubbel", "svart", "7340001700107", "E-01-4", "arm"),
-  P("KR-140-SV", "Kabelränna", "140 cm, svart", "7340001714005", "E-02-1", "ranna"),
-  P("FS-ERGO", "Fotstöd, justerbart", "svart", "7340001720600", "E-03-2", "fot"),
+  P("BRZ-SK-1680-VI", "Bordsskiva Professional", "160×80 cm, vit", "7340001216806", "A-03-2", "skiva", "Brizley", 14, 4),
+  P("BRZ-SK-1680-EK", "Bordsskiva Professional", "160×80 cm, ek", "7340001216813", "A-03-3", "skiva", "Brizley", 5, 4),
+  P("BRZ-SK-1890-AN", "Bordsskiva Professional", "180×90 cm, antracit", "7340001218909", "A-05-1", "skiva", "Brizley", 3, 2),
+  P("BRZ-ST-EL2-SV", "Elstativ Professional, 2 motorer", "svart, för 160–180 cm", "7340001302219", "B-02-1", "stativ", "Brizley", 1, 4),
+  P("BRZ-ST-EL2-VI", "Elstativ Professional, 2 motorer", "vit, för 160–180 cm", "7340001302226", "B-02-2", "stativ", "Brizley", 6, 4),
+  P("HU-3L-VI", "Hurts 3 lådor, låsbar", "vit", "7340001455106", "C-06-2", "hurts", undefined, 9, 3),
+  P("KS-ERGO-SV", "Kontorsstol Ergo Plus", "svart tyg", "7340001501209", "C-11-1", "stol", undefined, 18, 6),
+  P("SV-160-GR", "Skärmvägg bordsmonterad", "160 cm, grå filt", "7340001604306", "D-04-3", "vagg", undefined, 2, 4),
+  P("MA-DUO-SV", "Skärmarm dubbel", "svart", "7340001700107", "E-01-4", "arm", undefined, 11, 4),
+  P("KR-140-SV", "Kabelränna", "140 cm, svart", "7340001714005", "E-02-1", "ranna", undefined, 25, 10),
+  P("FS-ERGO", "Fotstöd, justerbart", "svart", "7340001720600", "E-03-2", "fot", undefined, 7, 4),
 ].map(p => [p.sku, p]))
 
 export const seedOrders = (): Order[] => {
@@ -59,5 +59,13 @@ export const seedOrders = (): Order[] => {
 export const lineDone = (l: Line) => l.picked >= l.qty || !!l.dev
 export const kolli = (o: Order) => o.lines.reduce((n, l) => n + l.qty, 0)
 export const mins = (ms: number) => Math.max(1, Math.round(ms / 60000))
-export const sortByLoc = (lines: Line[], products: Products) =>
+export const sortByLoc = <T extends Line>(lines: T[], products: Products) =>
   [...lines].sort((a, b) => (products[a.sku]?.loc ?? "").localeCompare(products[b.sku]?.loc ?? "", "sv", { numeric: true }))
+
+// Hur många av varje artikel som ligger i order som ännu inte är plockade.
+export const reserved = (orders: Order[]) => {
+  const r: Record<string, number> = {}
+  for (const o of orders) if (o.status === "ny" || o.status === "plock")
+    for (const l of o.lines) if (!l.dev) r[l.sku] = (r[l.sku] ?? 0) + l.qty - l.picked
+  return r
+}
