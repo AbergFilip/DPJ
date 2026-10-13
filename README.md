@@ -28,3 +28,13 @@ Inloggningen är simulerad: man väljer namn och skriver PIN 1234. Plockare (Sar
 ## Teknik
 
 React, TypeScript, Vite, Tailwind, shadcn/ui, Supabase (databas, realtid, fillagring), zxing (streckkoder via kameran), vite-plugin-pwa.
+
+## Orderimport
+
+Arbetsledaren kan importera order från en CSV-fil i översikten (`/admin.html`). En rad per orderrad, separerad med semikolon:
+
+```
+ordernr;kund;frakt;klart_senast;artikelnr;antal
+```
+
+`frakt` som börjar med "Express" blir expressorder, allt annat PostNord. Order som redan finns hoppas över. `public/demo-order.csv` är en påhittad exempelfil. När DPJ:s ordersystem kan exportera filen behöver bara kolumnnamnen matchas.

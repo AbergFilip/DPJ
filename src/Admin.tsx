@@ -8,6 +8,7 @@ import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Statu
 import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
+import ImportPanel from "./ImportPanel"
 import { Button } from "@/components/ui/button"
 
 const store = createStore()
@@ -235,6 +236,10 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
             ))}
             {!deviations.length && <p className="text-sm text-muted-foreground">Inga avvikelser.</p>}
           </div>
+        </Section>
+
+        <Section title="Importera order från CSV">
+          <ImportPanel products={products} existing={new Set(orders.map(o => o.id))} onImport={list => store.importOrders(list)} />
         </Section>
 
         <p className="text-sm text-muted-foreground">

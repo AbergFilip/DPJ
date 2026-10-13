@@ -4,6 +4,7 @@ import {
   SEED_PRODUCTS, lineDone, seedOrders,
   type DeviationKind, type Order, type Products, type Product, type Snapshot, type Status,
 } from "./data"
+import type { NewOrder } from "./csv"
 
 export interface Store {
   mode: "supabase" | "local"
@@ -14,6 +15,7 @@ export interface Store {
   pickItem(lineId: string, picker: string): Promise<number | null>
   reportDeviation(lineId: string, picker: string, kind: DeviationKind, found: number, note: string, photo: Blob | null): Promise<boolean>
   finish(orderId: string, picker: string): Promise<Status | null>
+  importOrders(orders: NewOrder[]): Promise<number>
   reset(): Promise<void>
 }
 
@@ -70,6 +72,14 @@ function localStore(): Store {
       const o = orders.find(x => x.id === id)
       if (!o || o.status !== "plock" || o.picker !== picker || !o.lines.every(lineDone)) return null
       o.status = o.lines.some(l => l.dev) ? "avv" : "pack"; o.doneAt = Date.now(); emit(); return o.status
+    },
+    async importOrders(list) {
+      const fresh = list.filter(n => !orders.some(o => o.id === n.id))
+      orders.push(...fresh.map(n => ({
+        id: n.id, cust: n.cust, ship: n.ship, shipTxt: n.shipTxt, due: n.due, status: "ny" as const,
+        lines: n.lines.map(l => ({ id: `${n.id}-${l.sku}`, sku: l.sku, qty: l.qty, picked: 0, locOk: false, dev: null })),
+      })))
+      emit(); return fresh.length
     },
     async reset() { orders = seedOrders(); emit() },
   }
@@ -146,6 +156,9 @@ function supabaseStore(sb: SupabaseClient): Store {
       return rpc<boolean>("report_deviation", { p_line: Number(lineId), p_picker: picker, p_kind: kind, p_found: found, p_note: note, p_photo_url: url })
     },
     finish: (id, picker) => rpc<Status | null>("finish_order", { p_order: id, p_picker: picker }),
+    importOrders: list => rpc<number>("import_orders", {
+      p_orders: list.map(o => ({ id: o.id, cust: o.cust, ship: o.ship, ship_txt: o.shipTxt, due: o.due, lines: o.lines })),
+    }),
     reset: () => rpc<void>("reset_demo", {}),
   }
 }
