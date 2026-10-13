@@ -59,6 +59,10 @@ Fliken Saldo börjar med "Att fylla på": artiklar där saldot inte räcker till
 
 Översikten har två grafer: plock per timme i dag och felrate per vecka (andel plockade order med avvikelse) åtta veckor bakåt. Demon har ingen äldre data, så timmar och veckor som redan passerat fylls med en påhittad historik i `src/stats.ts`. Den är grå i graferna och förklaras under dem, och den ser likadan ut varje gång eftersom slumpen har dagens datum som frö. Det som gjorts i demon räknas från riktiga lagerrörelser och order och ritas i färg.
 
+## Flera språk
+
+Plockappen finns på svenska, engelska, polska och arabiska. Språket väljs på inloggningen eller med listan uppe i appen, och sparas i mobilen. Arabiska läggs upp från höger till vänster (`dir="rtl"`). Alla texter ligger i `src/i18n.ts`, en rad per text med de fyra språken; saknas en översättning visas svenskan. Artikelnamn, kundnamn och hyllplatser är data och översätts inte. Översikten för arbetsledaren är kvar på svenska.
+
 ## Utan nät
 
 Appens filer cachas i mobilen (PWA), och senaste kända orderläget sparas lokalt. Tappar mobilen täckningen fortsätter plocket mot den lokala kopian: varje skanning sparas i en kö i mobilen och en gul rad visar hur många ändringar som väntar. När nätet är tillbaka skickas de i ordning. Om någon annan hann ta samma order under tiden sparas inte den ändringen, och plockaren får ett meddelande. Reglerna för plock finns i `src/ops.ts` och används både i demoläget och utan nät.

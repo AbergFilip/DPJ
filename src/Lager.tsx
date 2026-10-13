@@ -5,10 +5,12 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { reserved, type Order, type Product, type Products, type StockMove } from "./data"
 import { Chip, Pict, ScanBar } from "./parts"
+import { lang, t } from "./i18n"
 
 type Say = (kind: "ok" | "err" | "warn", title: string, sub?: string, sticky?: boolean) => void
 const byLoc = (a: Product, b: Product) => a.loc.localeCompare(b.loc, "sv", { numeric: true })
-const time = (ms: number) => new Date(ms).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })
+const time = (ms: number) => new Date(ms).toLocaleTimeString(lang === "sv" ? "sv-SE" : lang, { hour: "2-digit", minute: "2-digit" })
+const date = (ms: number) => new Date(ms).toLocaleDateString(lang === "sv" ? "sv-SE" : lang)
 
 export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset }: {
   products: Products; moves: StockMove[]; say: Say; onNoCamera: () => void
@@ -28,17 +30,17 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
     const ean = all.find(q => q.ean === code)
     const loc = all.find(q => q.loc === code)
     if (ean) {
-      if (ean.sku === sku) { setQty(n => Math.min(999, n + 1)); say("ok", `${ean.name}: ${qty + 1} st`, "Skanna nästa, eller hyllan när du är klar.") }
-      else { setSku(ean.sku); setQty(1); say("ok", ean.name, `${ean.variant}. Ställs på ${ean.loc}.`) }
+      if (ean.sku === sku) { setQty(n => Math.min(999, n + 1)); say("ok", t("in.count", { name: ean.name, n: qty + 1 }), t("in.next")) }
+      else { setSku(ean.sku); setQty(1); say("ok", ean.name, t("in.willGo", { variant: ean.variant, loc: ean.loc })) }
       return
     }
-    if (!p) { say("warn", loc ? "Skanna varan först" : "Okänd kod", loc ? "Börja med varans streckkod." : code); return }
-    if (code !== p.loc) { say("warn", loc ? `Fel hylla: ${code}` : "Okänd kod", `${p.name} ska till ${p.loc}.`); return }
+    if (!p) { say("warn", loc ? t("in.first") : t("f.unknown"), loc ? t("in.firstSub") : code); return }
+    if (code !== p.loc) { say("warn", loc ? t("f.wrongShelf", { code }) : t("f.unknown"), t("in.wrongShelf", { name: p.name, loc: p.loc })); return }
     setBusy(true)
     try {
       const v = await onReceive(p.sku, qty)
-      if (v == null) { say("err", "Inleveransen sparades inte", "Försök igen.", true); return }
-      say("ok", `${qty} st in på ${p.loc}`, `Nytt saldo: ${v} st.`)
+      if (v == null) { say("err", t("in.fail"), t("in.retry"), true); return }
+      say("ok", t("in.ok", { n: qty, loc: p.loc }), t("in.okSub", { n: v }))
       setSku(null); setQty(1)
     } catch { /* felet visas via onError */ } finally { setBusy(false) }
   }
@@ -50,18 +52,18 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
 
   return (
     <main className="mx-auto max-w-xl px-4 pb-24">
-      <h1 className="mt-5 text-2xl font-bold tracking-tight">Inleverans</h1>
-      <p className="text-muted-foreground">{p ? "Skanna fler av samma vara, eller hyllan för att ställa in dem." : "Skanna varans streckkod."}</p>
+      <h1 className="mt-5 text-2xl font-bold tracking-tight">{t("in.title")}</h1>
+      <p className="text-muted-foreground">{p ? t("in.sub2") : t("in.sub")}</p>
 
       {p ? (
         <div className="mt-4 overflow-hidden rounded-md border bg-card">
           <div className="flex bg-sign text-sign-foreground">
             <div className="flex-1 px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Ställ på hyllplats</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{t("in.put")}</div>
               <div className="text-[44px] font-extrabold leading-none tracking-tight tabular-nums">{p.loc}</div>
             </div>
             <div className="border-l border-white/20 px-4 py-3 text-right">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Saldo nu</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{t("in.stockNow")}</div>
               <div className="text-[40px] font-extrabold leading-none tabular-nums">{p.stock}</div>
             </div>
           </div>
@@ -73,25 +75,25 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
             </div>
           </div>
           <div className="flex items-center gap-3 border-t px-4 py-3">
-            <span className="flex-1 text-sm text-muted-foreground">Antal in</span>
-            <Button variant="outline" className="h-12 w-12" aria-label="Minska" onClick={() => setQty(Math.max(1, qty - 1))}><Minus /></Button>
+            <span className="flex-1 text-sm text-muted-foreground">{t("in.qty")}</span>
+            <Button variant="outline" className="h-12 w-12" aria-label={t("common.dec")} onClick={() => setQty(Math.max(1, qty - 1))}><Minus /></Button>
             <output className="min-w-12 text-center text-3xl font-extrabold tabular-nums">{qty}</output>
-            <Button variant="outline" className="h-12 w-12" aria-label="Öka" onClick={() => setQty(Math.min(999, qty + 1))}><Plus /></Button>
+            <Button variant="outline" className="h-12 w-12" aria-label={t("common.inc")} onClick={() => setQty(Math.min(999, qty + 1))}><Plus /></Button>
           </div>
         </div>
       ) : (
         <div className="mt-4 grid place-items-center rounded-md border-2 border-dashed px-4 py-8 text-center text-muted-foreground">
           <PackagePlus className="h-10 w-10" />
-          <div className="mt-2 font-semibold text-foreground">Skanna en vara som ska in på lagret</div>
-          <div className="text-sm">Appen visar vilken hylla den ska stå på.</div>
+          <div className="mt-2 font-semibold text-foreground">{t("in.empty")}</div>
+          <div className="text-sm">{t("in.empty2")}</div>
         </div>
       )}
 
-      <ScanBar placeholder={p ? "Skanna vara eller hylla" : "Skanna varans streckkod"} onScan={onScan} onNoCamera={onNoCamera}
-        hint={p ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} focusKey={`${sku}-${qty}`} />
+      <ScanBar placeholder={p ? t("in.scan") : t("scan.item")} onScan={onScan} onNoCamera={onNoCamera}
+        hint={p ? t("hint.shelf") : t("hint.item")} focusKey={`${sku}-${qty}`} />
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span className="text-[13px] text-muted-foreground">Testa:</span>
+        <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
         {!p ? (
           <>
             {low && <Chip onClick={() => onScan(low.ean)}>{low.name.split(" ")[0]} <span className="text-xs text-muted-foreground">{low.variant}</span></Chip>}
@@ -99,15 +101,15 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
           </>
         ) : (
           <>
-            <Chip onClick={() => onScan(p.ean)}>En till</Chip>
-            <Chip onClick={() => onScan(p.loc)}>Rätt hylla <code className="font-mono text-xs text-muted-foreground">{p.loc}</code></Chip>
-            {wrongLoc && <Chip bad onClick={() => onScan(wrongLoc.loc)}>Fel hylla <code className="font-mono text-xs">{wrongLoc.loc}</code></Chip>}
+            <Chip onClick={() => onScan(p.ean)}>{t("in.one")}</Chip>
+            <Chip onClick={() => onScan(p.loc)}>{t("chip.rightShelf")} <code className="font-mono text-xs text-muted-foreground">{p.loc}</code></Chip>
+            {wrongLoc && <Chip bad onClick={() => onScan(wrongLoc.loc)}>{t("chip.wrongShelf")} <code className="font-mono text-xs">{wrongLoc.loc}</code></Chip>}
           </>
         )}
       </div>
-      {p && <div className="mt-4 text-center"><button className="text-sm text-muted-foreground underline" onClick={() => { setSku(null); setQty(1) }}>Avbryt</button></div>}
+      {p && <div className="mt-4 text-center"><button className="text-sm text-muted-foreground underline" onClick={() => { setSku(null); setQty(1) }}>{t("common.cancel")}</button></div>}
 
-      <h2 className="mb-2 mt-8 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Senaste inleveranser</h2>
+      <h2 className="mb-2 mt-8 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("in.recent")}</h2>
       {recent.length ? (
         <div className="overflow-hidden rounded-md border bg-card">
           {recent.map(m => {
@@ -121,7 +123,7 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
             )
           })}
         </div>
-      ) : <p className="text-sm text-muted-foreground">Inga inleveranser ännu.</p>}
+      ) : <p className="text-sm text-muted-foreground">{t("in.none")}</p>}
     </main>
   )
 }
@@ -154,13 +156,13 @@ export function Saldo({ products, orders, onRefill, onCount }: {
 
   return (
     <main className="mx-auto max-w-xl px-4 pb-24">
-      <h1 className="mt-5 text-2xl font-bold tracking-tight">Saldo per hylla</h1>
+      <h1 className="mt-5 text-2xl font-bold tracking-tight">{t("s.title")}</h1>
       <p className="text-muted-foreground">
-        {shortN ? `${shortN} artiklar räcker inte till orderna i kön. ` : ""}{lowN ? `${lowN} har lågt saldo.` : !shortN ? "Allt räcker till orderna i kön." : ""}
+        {shortN ? t("s.short", { n: shortN }) : ""}{lowN ? t("s.low", { n: lowN }) : !shortN ? t("s.allOk") : ""}
       </p>
 
       <h2 className="mb-2 mt-6 flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-        <TrendingDown className="h-4 w-4" />Att fylla på
+        <TrendingDown className="h-4 w-4" />{t("s.refill")}
       </h2>
       {refill.length ? (
         <div className="grid gap-2">
@@ -174,30 +176,30 @@ export function Saldo({ products, orders, onRefill, onCount }: {
                 </span>
                 <span className="text-right text-sm leading-tight">
                   <b className="block text-2xl font-extrabold tabular-nums text-warn">{r.need}</b>
-                  <span className="text-xs text-muted-foreground">att fylla på</span>
+                  <span className="text-xs text-muted-foreground">{t("s.need")}</span>
                 </span>
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <span className="flex-1 text-xs text-muted-foreground">
-                  {r.p.stock} på hyllan{r.reserved > 0 ? `, ${r.reserved} i kön` : ""}
-                  {r.short ? <b className="ml-1.5 rounded bg-bad-soft px-1 text-destructive">Räcker inte</b> : <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">Lågt</b>}
+                  {t("s.onShelf", { n: r.p.stock })}{r.reserved > 0 ? t("s.inQueue", { n: r.reserved }) : ""}
+                  {r.short ? <b className="ml-1.5 rounded bg-bad-soft px-1 text-destructive">{t("s.shortBadge")}</b> : <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">{t("s.lowBadge")}</b>}
                 </span>
-                <Button variant="outline" className="h-10" onClick={() => onCount(r.p.sku)}>Räkna</Button>
-                <Button className="h-10" onClick={() => onRefill(r.p.sku)}>Fyll på</Button>
+                <Button variant="outline" className="h-10" onClick={() => onCount(r.p.sku)}>{t("s.count")}</Button>
+                <Button className="h-10" onClick={() => onRefill(r.p.sku)}>{t("s.fill")}</Button>
               </div>
             </div>
           ))}
         </div>
-      ) : <p className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">Inget behöver fyllas på. Alla hyllor räcker till orderna i kön.</p>}
+      ) : <p className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">{t("s.noRefill")}</p>}
 
-      <h2 className="mb-2 mt-7 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Alla hyllplatser</h2>
+      <h2 className="mb-2 mt-7 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("s.all")}</h2>
       <div className="mt-4 flex gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Sök plats, artikel eller EAN" aria-label="Sök"
-            className="h-11 w-full rounded-md border bg-card pl-9 pr-3 text-base outline-none focus:border-ring" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground rtl:left-auto rtl:right-3" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={t("s.search")} aria-label={t("s.searchAria")}
+            className="h-11 w-full rounded-md border bg-card pl-9 pr-3 rtl:pl-3 rtl:pr-9 text-base outline-none focus:border-ring" />
         </div>
-        <Button variant={onlyLow ? "default" : "outline"} className="h-11" onClick={() => setOnlyLow(!onlyLow)}>Bara låga</Button>
+        <Button variant={onlyLow ? "default" : "outline"} className="h-11" onClick={() => setOnlyLow(!onlyLow)}>{t("s.onlyLow")}</Button>
       </div>
       <div className="mt-3 overflow-hidden rounded-md border bg-card">
         {shown.map(({ p, reserved: r, free, short, low }) => (
@@ -207,20 +209,20 @@ export function Saldo({ products, orders, onRefill, onCount }: {
               <span className="block truncate font-semibold">{p.name}</span>
               <span className="block truncate text-muted-foreground">{p.variant}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                {r > 0 ? `${r} i kön · ` : ""}{free} lediga
-                {short && <b className="ml-1.5 rounded bg-bad-soft px-1 text-destructive">Räcker inte</b>}
-                {low && <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">Lågt</b>}
+                {r > 0 ? t("s.queueN", { n: r }) : ""}{t("s.free", { n: free })}
+                {short && <b className="ml-1.5 rounded bg-bad-soft px-1 text-destructive">{t("s.shortBadge")}</b>}
+                {low && <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">{t("s.lowBadge")}</b>}
               </span>
             </span>
             <span className="flex items-center gap-2">
               <span className={cn("text-right text-2xl font-extrabold tabular-nums", short && "text-destructive")}>
-                {p.stock}<span className="block text-[11px] font-medium text-muted-foreground">st</span>
+                {p.stock}<span className="block text-[11px] font-medium text-muted-foreground">{t("common.st")}</span>
               </span>
-              <button aria-label={`Räkna ${p.loc}`} onClick={() => onCount(p.sku)} className="grid h-10 w-10 place-items-center rounded-md border text-muted-foreground"><ClipboardCheck className="h-4 w-4" /></button>
+              <button aria-label={t("s.countAria", { loc: p.loc })} onClick={() => onCount(p.sku)} className="grid h-10 w-10 place-items-center rounded-md border text-muted-foreground"><ClipboardCheck className="h-4 w-4" /></button>
             </span>
           </div>
         ))}
-        {!shown.length && <p className="px-3 py-4 text-sm text-muted-foreground">Inga träffar.</p>}
+        {!shown.length && <p className="px-3 py-4 text-sm text-muted-foreground">{t("s.noHits")}</p>}
       </div>
     </main>
   )
@@ -250,9 +252,9 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
     const code = raw.trim().toUpperCase()
     if (!code) return
     const q = all.find(x => x.loc === code) ?? all.find(x => x.ean === code)
-    if (!q) { say("warn", "Okänd kod", code); return }
+    if (!q) { say("warn", t("f.unknown"), code); return }
     setSku(q.sku); setTyped(""); setNote(""); setLast(null)
-    say("ok", `${q.loc}: ${q.name}`, "Räkna allt som står på hyllan och slå in antalet.")
+    say("ok", t("inv.scanned", { loc: q.loc, name: q.name }), t("inv.sub2"))
   }
 
   async function save() {
@@ -260,10 +262,10 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
     setBusy(true)
     try {
       const v = await onCount(p.sku, counted, note.trim())
-      if (v == null) { say("err", "Inventeringen sparades inte", "Försök igen.", true); return }
+      if (v == null) { say("err", t("inv.failed"), t("in.retry"), true); return }
       const d = counted - p.stock
-      say(d === 0 ? "ok" : "warn", d === 0 ? `${p.loc} stämmer: ${v} st` : `${p.loc} rättat till ${v} st`,
-        d === 0 ? "Inget att rätta." : `Saldot ändrades ${d > 0 ? "+" : ""}${d} st.`)
+      say(d === 0 ? "ok" : "warn", d === 0 ? t("inv.okSame", { loc: p.loc, n: v }) : t("inv.fixed", { loc: p.loc, n: v }),
+        d === 0 ? t("inv.okSameSub") : t("inv.fixedSub", { n: `${d > 0 ? "+" : ""}${d}` }))
       setLast({ loc: p.loc, diff: d }); setSku(null); setTyped(""); setNote("")
     } catch { /* felet visas via onError */ } finally { setBusy(false) }
   }
@@ -272,13 +274,13 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
 
   return (
     <main className="mx-auto max-w-xl px-4 pb-24">
-      <button className="mt-3 -ml-1 flex items-center gap-1 text-base font-semibold" onClick={onDone}>Tillbaka till saldo</button>
-      <h1 className="mt-2 text-2xl font-bold tracking-tight">Inventering</h1>
-      <p className="text-muted-foreground">{p ? "Räkna allt som står på hyllan och slå in antalet." : "Skanna hyllan du vill räkna."}</p>
+      <button className="mt-3 -ml-1 flex items-center gap-1 text-base font-semibold" onClick={onDone}>{t("inv.back")}</button>
+      <h1 className="mt-2 text-2xl font-bold tracking-tight">{t("inv.title")}</h1>
+      <p className="text-muted-foreground">{p ? t("inv.sub2") : t("inv.sub")}</p>
 
       {last && (
         <div className={cn("mt-4 rounded-md p-3 text-sm", last.diff === 0 ? "bg-ok-soft" : "bg-warn-soft")}>
-          <b>{last.loc}</b> {last.diff === 0 ? "stämde med saldot." : `rättades ${last.diff > 0 ? "+" : ""}${last.diff} st.`} Skanna nästa hylla.
+          {last.diff === 0 ? t("inv.lastSame", { loc: last.loc }) : t("inv.lastDiff", { loc: last.loc, n: `${last.diff > 0 ? "+" : ""}${last.diff}` })} {t("inv.nextShelf")}
         </div>
       )}
 
@@ -287,11 +289,11 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
           <div className="mt-4 overflow-hidden rounded-md border bg-card">
             <div className="flex bg-sign text-sign-foreground">
               <div className="flex-1 px-4 py-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Hyllplats</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{t("pick.shelf")}</div>
                 <div className="text-[44px] font-extrabold leading-none tracking-tight tabular-nums">{p.loc}</div>
               </div>
               <div className="border-l border-white/20 px-4 py-3 text-right">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Saldo i appen</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{t("inv.stockApp")}</div>
                 <div className="text-[40px] font-extrabold leading-none tabular-nums">{p.stock}</div>
               </div>
             </div>
@@ -300,17 +302,17 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
               <div className="min-w-0">
                 <div className="font-bold leading-tight">{p.name}</div>
                 <div className="mt-1"><span className="rounded bg-accent px-1.5 py-0.5 font-bold text-accent-foreground">{p.variant}</span></div>
-                <div className="mt-1 text-xs text-muted-foreground">{p.countedAt ? `Senast räknad ${new Date(p.countedAt).toLocaleDateString("sv-SE")}` : "Aldrig räknad"}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{p.countedAt ? t("inv.last", { d: date(p.countedAt) }) : t("inv.never")}</div>
               </div>
             </div>
             <div className="border-t px-4 py-3">
               <div className="flex items-baseline gap-3">
-                <span className="flex-1 text-sm text-muted-foreground">Räknat antal</span>
+                <span className="flex-1 text-sm text-muted-foreground">{t("inv.counted")}</span>
                 <output className="text-4xl font-extrabold tabular-nums">{typed === "" ? "–" : counted}</output>
               </div>
               {diff != null && (
                 <div className={cn("mt-1 text-right text-sm font-bold", diff === 0 ? "text-ok" : "text-destructive")}>
-                  {diff === 0 ? "Stämmer med saldot" : `${diff > 0 ? "+" : ""}${diff} mot saldot`}
+                  {diff === 0 ? t("inv.same") : t("inv.diff", { n: `${diff > 0 ? "+" : ""}${diff}` })}
                 </div>
               )}
             </div>
@@ -320,32 +322,32 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
             {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map(c => (
               <Button key={c} variant="outline" className="h-14 text-2xl font-bold tabular-nums" onClick={() => key(c)}>{c}</Button>
             ))}
-            <Button variant="outline" className="h-14 text-base font-semibold" onClick={() => key("<")} aria-label="Radera siffra">Radera</Button>
-            <Button variant="outline" className="h-14 text-base font-semibold" onClick={() => setTyped("0")}>Tom hylla</Button>
+            <Button variant="outline" className="h-14 text-base font-semibold" onClick={() => key("<")}>{t("common.erase")}</Button>
+            <Button variant="outline" className="h-14 text-base font-semibold" onClick={() => setTyped("0")}>{t("inv.emptyShelf")}</Button>
           </div>
 
           {diff != null && diff !== 0 && (
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Kommentar, t.ex. stod på fel hylla" aria-label="Kommentar"
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder={t("inv.notePh")} aria-label={t("dev.note")}
               className="mt-3 h-11 w-full rounded-md border bg-card px-3 text-base outline-none focus:border-ring" />
           )}
-          <Button className="mt-3 h-12 w-full text-base font-bold" disabled={counted == null || busy} onClick={save}>Spara inventeringen</Button>
-          <div className="mt-3 text-center"><button className="text-sm text-muted-foreground underline" onClick={() => { setSku(null); setTyped("") }}>Avbryt</button></div>
+          <Button className="mt-3 h-12 w-full text-base font-bold" disabled={counted == null || busy} onClick={save}>{t("inv.save")}</Button>
+          <div className="mt-3 text-center"><button className="text-sm text-muted-foreground underline" onClick={() => { setSku(null); setTyped("") }}>{t("common.cancel")}</button></div>
         </>
       ) : (
         <>
           <div className="mt-4 grid place-items-center rounded-md border-2 border-dashed px-4 py-8 text-center text-muted-foreground">
             <ClipboardCheck className="h-10 w-10" />
-            <div className="mt-2 font-semibold text-foreground">Skanna hylletiketten</div>
-            <div className="text-sm">Du kan också skanna en vara som står på hyllan.</div>
+            <div className="mt-2 font-semibold text-foreground">{t("inv.scanEmpty")}</div>
+            <div className="text-sm">{t("inv.scanEmpty2")}</div>
           </div>
-          <ScanBar placeholder="Skanna hylla eller vara" hint="Rikta mot hylletiketten" onScan={onScan} onNoCamera={onNoCamera} focusKey={last?.loc} />
+          <ScanBar placeholder={t("inv.scan")} hint={t("hint.shelf")} onScan={onScan} onNoCamera={onNoCamera} focusKey={last?.loc} />
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-muted-foreground">Testa:</span>
-            {(never[0] ?? all[0]) && <Chip onClick={() => onScan((never[0] ?? all[0]).loc)}>Hylla <code className="font-mono text-xs text-muted-foreground">{(never[0] ?? all[0]).loc}</code></Chip>}
-            {rows.find(r => r.need > 0) && <Chip onClick={() => onScan(rows.find(r => r.need > 0)!.p.loc)}>Hylla som tar slut</Chip>}
+            <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+            {(never[0] ?? all[0]) && <Chip onClick={() => onScan((never[0] ?? all[0]).loc)}>{t("inv.chipShelf")} <code className="font-mono text-xs text-muted-foreground">{(never[0] ?? all[0]).loc}</code></Chip>}
+            {rows.find(r => r.need > 0) && <Chip onClick={() => onScan(rows.find(r => r.need > 0)!.p.loc)}>{t("inv.chipLow")}</Chip>}
           </div>
 
-          <h2 className="mb-2 mt-8 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Senast räknat</h2>
+          <h2 className="mb-2 mt-8 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("inv.history")}</h2>
           {moves.some(m => m.kind === "inventering") ? (
             <div className="overflow-hidden rounded-md border bg-card">
               {moves.filter(m => m.kind === "inventering").slice(0, 6).map(m => {
@@ -360,7 +362,7 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
                 )
               })}
             </div>
-          ) : <p className="text-sm text-muted-foreground">{never.length} av {all.length} hyllplatser är inte räknade än.</p>}
+          ) : <p className="text-sm text-muted-foreground">{t("inv.notCounted", { a: never.length, b: all.length })}</p>}
         </>
       )}
     </main>

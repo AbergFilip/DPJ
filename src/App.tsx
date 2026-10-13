@@ -12,7 +12,8 @@ import {
   type DeviationKind, type Line, type Order, type Products, type Snapshot, type Status,
 } from "./data"
 import { createStore, type SyncStatus } from "./store"
-import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
+import { currentUser, logout, type User } from "./auth"
+import { LANGS, lang, setLang, t } from "./i18n"
 import Login, { Logo } from "./Login"
 import { Chip, Header, Pict, ScanBar } from "./parts"
 import { Inleverans, Inventering, Saldo, refillRows, stockRows } from "./Lager"
@@ -34,12 +35,12 @@ function roundOf(orders: Order[], me: string): Round {
 type FlashKind = "ok" | "err" | "warn"
 interface Flash { kind: FlashKind; title: string; sub?: string; sticky?: boolean; n: number }
 
-const STATUS: Record<Status, { label: string; cls: string }> = {
-  ny: { label: "Ny", cls: "bg-secondary text-secondary-foreground" },
-  plock: { label: "Plockas", cls: "bg-warn-soft text-warn" },
-  pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
-  avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
-  skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
+const STATUS: Record<Status, string> = {
+  ny: "bg-secondary text-secondary-foreground",
+  plock: "bg-warn-soft text-warn",
+  pack: "bg-ok-soft text-ok",
+  avv: "bg-bad-soft text-destructive",
+  skickad: "bg-secondary text-secondary-foreground",
 }
 
 let actx: AudioContext | undefined
@@ -79,7 +80,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   const busy = useRef(false)
 
   const [sync, setSync] = useState<SyncStatus>({ online: true, pending: 0 })
-  useEffect(() => store.subscribe(setSnap, msg => say("err", "Något gick inte att spara", msg, true)), [])
+  useEffect(() => store.subscribe(setSnap, msg => say("err", t("f.saveError"), msg, true)), [])
   useEffect(() => store.onStatus(setSync), [])
   useEffect(() => {
     if (!flash || flash.sticky) return
@@ -88,7 +89,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, [flash])
 
   function say(kind: FlashKind, title: string, sub?: string, sticky?: boolean) { setFlash({ kind, title, sub, sticky, n: Date.now() }); feedback(kind) }
-  const noCamera = () => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)
+  const noCamera = () => say("warn", t("f.camera"), t("f.cameraSub"), true)
   const go = (v: View) => { setView(v); setSel(null); window.scrollTo(0, 0) }
   const goSku = (t: Tab, sku: string) => { setFocusSku(sku); go({ name: t }) }
   const once = async (fn: () => Promise<void>) => {
@@ -113,10 +114,10 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
     const bump = () => setShakeN(n => n + 1)
     if (!l.locOk) {
       if (code === p.loc) {
-        await once(async () => { if (await store.confirmLocation(l.id, me)) say("ok", `Rätt hylla ${p.loc}`, "Skanna varan.") })
-      } else if (byLoc) { say("warn", `Fel hylla: ${code}`, `Gå till ${p.loc}.`); bump() }
-      else if (byEan) { say("warn", "Skanna hyllan först", `Hyllplats ${p.loc}.`); bump() }
-      else { say("warn", "Okänd kod", code); bump() }
+        await once(async () => { if (await store.confirmLocation(l.id, me)) say("ok", t("f.rightShelf", { loc: p.loc }), t("f.scanItem")) })
+      } else if (byLoc) { say("warn", t("f.wrongShelf", { code }), t("f.goTo", { loc: p.loc })); bump() }
+      else if (byEan) { say("warn", t("f.shelfFirst"), t("f.shelfIs", { loc: p.loc })); bump() }
+      else { say("warn", t("f.unknown"), code); bump() }
       return
     }
     if (code === p.ean) {
@@ -126,14 +127,14 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
         if (n >= l.qty) {
           setSel(null)
           const next = currentLine({ ...round, lines: round.lines.map(x => x.id === l.id ? { ...x, picked: n } : x) }, products, null).line
-          const box = round.orders.length > 1 ? ` i låda ${l.box}` : ""
-          say("ok", `Rad klar: ${l.qty} st${box}`, next ? `Nästa: ${products[next.sku].loc}` : "Alla rader plockade.")
-        } else say("ok", `${n} av ${l.qty}`, round.orders.length > 1 ? `Låda ${l.box}. Skanna ${l.qty - n} till.` : `Skanna ${l.qty - n} till.`)
+          const box = round.orders.length > 1 ? t("f.inBox", { n: l.box }) : ""
+          say("ok", t("f.rowDone", { n: l.qty, box }), next ? t("f.next", { loc: products[next.sku].loc }) : t("f.allPicked"))
+        } else say("ok", t("f.ofQty", { n, q: l.qty }), round.orders.length > 1 ? t("f.boxScanMore", { b: l.box, n: l.qty - n }) : t("f.scanMore", { n: l.qty - n }))
       })
     } else if (byEan) {
-      say("err", "Fel vara, lägg tillbaka", `Du skannade ${byEan.name}, ${byEan.variant}. Ska vara ${p.variant}.`, true); bump()
-    } else if (byLoc) say("warn", "Hyllan är redan skannad", "Skanna varans streckkod.")
-    else { say("warn", "Okänd kod", code); bump() }
+      say("err", t("f.wrongItem"), t("f.wrongItemSub", { name: byEan.name, variant: byEan.variant, want: p.variant }), true); bump()
+    } else if (byLoc) say("warn", t("f.shelfAlready"), t("scan.item"))
+    else { say("warn", t("f.unknown"), code); bump() }
   }
 
   return (
@@ -161,12 +162,12 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
         <Queue orders={orders} user={user} sync={sync}
           onStart={ids => once(async () => {
             if (await store.claimMany(ids, me)) go({ name: "pick" })
-            else say("warn", ids.length > 1 ? "Någon order är redan tagen" : "Ordern är redan tagen", "Någon annan hann före, eller så har du en runda igång.")
+            else say("warn", ids.length > 1 ? t("f.takenMany") : t("f.taken"), t("f.takenSub"))
           })}
           onOpen={() => go({ name: "pick" })}
-          onReset={() => once(async () => { await store.reset(); say("ok", "Demodata återställd") })} />
+          onReset={() => once(async () => { await store.reset(); say("ok", t("f.resetOk")) })} />
       )}
-      {(view.name === "pick" || view.name === "done") && !round.orders.length && <p className="p-6 text-muted-foreground">Du har ingen order igång. <button className="underline" onClick={() => go({ name: "queue" })}>Till kön</button></p>}
+      {(view.name === "pick" || view.name === "done") && !round.orders.length && <p className="p-6 text-muted-foreground">{t("queue.none")} <button className="underline" onClick={() => go({ name: "queue" })}>{t("queue.toQueue")}</button></p>}
       {view.name === "pick" && round.orders.length > 0 && (
         <>
           <Pick r={round} products={products} sel={sel} setSel={setSel} shakeN={shakeN}
@@ -177,7 +178,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
             onFinish={() => go({ name: "done" })}
             onRelease={() => once(async () => {
               for (const o of round.orders) await store.release(o.id, me)
-              say("ok", round.orders.length > 1 ? `${round.orders.length} order släppta` : `#${round.orders[0].id} släppt`, "Orderna ligger i kön igen."); go({ name: "queue" })
+              say("ok", round.orders.length > 1 ? t("f.releasedMany", { n: round.orders.length }) : t("f.released", { id: round.orders[0].id }), t("f.releasedSub")); go({ name: "queue" })
             })} />
           <DeviationSheet open={devOpen} onOpenChange={setDevOpen} line={currentLine(round, products, sel).line} products={products}
             onSave={(kind, found, note, photo) => once(async () => {
@@ -185,7 +186,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
               if (!l) return
               await store.reportDeviation(l.id, me, kind, found, note, photo)
               setSel(null); setDevOpen(false)
-              say("warn", `Raden flaggad: ${kind}`, `Order #${l.orderId} markeras med avvikelse.`)
+              say("warn", t("f.flagged", { kind: t(`dev.${kind}`) }), t("f.flaggedSub", { id: l.orderId }))
             })} />
         </>
       )}
@@ -194,9 +195,9 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
           onSend={() => once(async () => {
             const res = []
             for (const o of round.orders) res.push(await store.finish(o.id, me))
-            if (res.some(x => !x)) { say("warn", "Någon order kunde inte skickas", "Kontrollera att alla rader är klara."); return }
+            if (res.some(x => !x)) { say("warn", t("f.sendFail"), t("f.sendFailSub")); return }
             const n = res.length
-            say("ok", n > 1 ? `${n} order skickade till pack` : `#${round.orders[0].id} skickad till pack`, res.includes("avv") ? "Avvikelsen syns för pack och inköp." : "Bra jobbat.")
+            say("ok", n > 1 ? t("f.sentMany", { n }) : t("f.sent", { id: round.orders[0].id }), res.includes("avv") ? t("f.sentDev") : t("f.good"))
             go({ name: "queue" })
           })} />
       )}
@@ -213,14 +214,14 @@ function SyncBar({ sync }: { sync: SyncStatus }) {
   return (
     <div role="status" className={cn("px-4 py-2 text-center text-[13px] font-semibold", sync.online ? "bg-secondary text-secondary-foreground" : "bg-warn-soft text-warn")}>
       {sync.online
-        ? `Skickar ${sync.pending} ändringar som gjordes utan nät…`
-        : `Ingen täckning. Plocket sparas i mobilen${sync.pending ? ` (${sync.pending} väntar)` : ""} och skickas när nätet är tillbaka.`}
+        ? t("sync.sending", { n: sync.pending })
+        : t("sync.offline", { extra: sync.pending ? t("sync.pending", { n: sync.pending }) : "" })}
     </div>
   )
 }
 
 function UspStrip() {
-  const items = ["Lagervaror skickas inom 24h", "Express före kl. 12", "Varje kolli skannas"]
+  const items = [t("usp.1"), t("usp.2"), t("usp.3")]
   return (
     <div className="bg-strip text-[13px] font-medium text-strip-foreground">
       <div className="mx-auto flex max-w-xl items-center justify-between gap-3 overflow-hidden px-4 py-1.5">
@@ -257,16 +258,16 @@ function FlashBanner({ flash, onClose }: { flash: Flash | null; onClose: () => v
 }
 
 function Pill({ s }: { s: Status }) {
-  return <span className={cn("inline-flex items-center rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide", STATUS[s].cls)}>{STATUS[s].label}</span>
+  return <span className={cn("inline-flex items-center rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide", STATUS[s])}>{t(`status.${s}`)}</span>
 }
 function ShipBadge({ o }: { o: Order }) {
   return o.ship === "exp"
-    ? <Badge className="gap-1 rounded bg-strip text-strip-foreground shadow-none hover:bg-strip"><Zap className="h-3 w-3" />Express</Badge>
-    : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />PostNord</Badge>
+    ? <Badge className="gap-1 rounded bg-strip text-strip-foreground shadow-none hover:bg-strip"><Zap className="h-3 w-3" />{t("p.express")}</Badge>
+    : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />{o.shipTxt.split(" ")[0]}</Badge>
 }
 
 function TopBar({ user, onLogout, tab, onTab, refill }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void; refill: number }) {
-  const tabs: [Tab, string][] = [["queue", "Plock"], ["pack", "Pack"], ["inleverans", "In"], ["saldo", "Saldo"]]
+  const tabs: [Tab, string][] = [["queue", t("tab.queue")], ["pack", t("tab.pack")], ["inleverans", t("tab.in")], ["saldo", t("tab.saldo")]]
   return (
     <>
       <UspStrip />
@@ -274,17 +275,21 @@ function TopBar({ user, onLogout, tab, onTab, refill }: { user: User; onLogout: 
         <div className="mx-auto flex max-w-xl items-center gap-3 px-4 pt-3">
           <Logo />
           <div className="flex-1" />
+          <select aria-label={t("common.language")} value={lang} onChange={e => setLang(e.target.value as typeof lang)}
+            className="h-8 rounded-md border bg-card px-1.5 text-xs font-bold text-muted-foreground">
+            {LANGS.map(l => <option key={l.code} value={l.code}>{l.short}</option>)}
+          </select>
           <div className="text-right leading-tight">
             <div className="font-semibold">{user.name}</div>
-            <button className="text-xs text-muted-foreground underline" onClick={onLogout}>Logga ut</button>
+            <button className="text-xs text-muted-foreground underline" onClick={onLogout}>{t("nav.logout")}</button>
           </div>
         </div>
-        <nav className="mx-auto mt-2 flex max-w-xl px-2" aria-label="Meny">
-          {tabs.map(([t, label]) => (
-            <button key={t} onClick={() => onTab(t)} aria-current={tab === t ? "page" : undefined}
-              className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
+        <nav className="mx-auto mt-2 flex max-w-xl px-2" aria-label={t("nav.menu")}>
+          {tabs.map(([k, label]) => (
+            <button key={k} onClick={() => onTab(k)} aria-current={tab === k ? "page" : undefined}
+              className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
               {label}
-              {t === "saldo" && refill > 0 && <span className="ml-1.5 inline-grid h-5 min-w-5 place-items-center rounded-full bg-warn px-1 text-xs font-bold text-white" aria-label={`${refill} att fylla på`}>{refill}</span>}
+              {k === "saldo" && refill > 0 && <span className="ml-1.5 inline-grid h-5 min-w-5 place-items-center rounded-full bg-warn px-1 text-xs font-bold text-white" aria-label={t("nav.refill", { n: refill })}>{refill}</span>}
             </button>
           ))}
         </nav>
@@ -307,28 +312,28 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
   const chosen = picked.filter(id => orders.some(o => o.id === id && o.status === "ny"))
   const toggle = (id: string) => setPicked(chosen.includes(id) ? chosen.filter(x => x !== id) : [...chosen, id].slice(0, MAX_ROUND))
   const groups: [string, Order[]][] = [
-    ["Pågår", list.filter(o => o.status === "plock")],
-    ["Orderkö i dag", list.filter(o => o.status === "ny")],
-    ["Plockade", list.filter(o => o.status === "pack" || o.status === "avv")],
+    [t("group.now"), list.filter(o => o.status === "plock")],
+    [t("group.today"), list.filter(o => o.status === "ny")],
+    [t("group.done"), list.filter(o => o.status === "pack" || o.status === "avv" || o.status === "skickad")],
   ]
   return (
     <>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-5 flex items-baseline gap-3">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Hej {me}!</h1>
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ROLE_LABEL[user.role]}</span>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{t("queue.hi", { name: me })}</h1>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(`role.${user.role}`)}</span>
           <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold",
             store.mode === "local" ? "text-muted-foreground" : sync.online ? "text-ok" : "text-warn")}>
             <span className={cn("h-2 w-2 rounded-full", store.mode === "local" ? "bg-muted-foreground" : sync.online ? "bg-ok" : "bg-warn")} />
-            {store.mode === "local" ? "Lokal demo" : sync.online ? "Live, delas med alla" : "Utan nät"}
+            {store.mode === "local" ? t("live.local") : sync.online ? t("live.on") : t("live.off")}
           </span>
         </div>
-        <p className="text-muted-foreground">{cnt("ny")} order väntar på plock i dag.</p>
+        <p className="text-muted-foreground">{t("queue.waiting", { n: cnt("ny") })}</p>
         <div className="mt-4 grid grid-cols-4 gap-2">
-          {([["ny", "Att plocka"], ["plock", "Plockas nu"], ["avv", "Avvikelse"], ["pack", "Till pack"]] as [Status, string][]).map(([k, t]) => (
+          {(["ny", "plock", "avv", "pack"] as Status[]).map(k => (
             <div key={k} className="rounded-md border bg-card px-2.5 py-2">
               <div className={cn("text-2xl font-extrabold leading-none tabular-nums", k === "avv" && cnt(k) > 0 && "text-destructive")}>{cnt(k)}</div>
-              <div className="mt-1 text-[11px] font-medium leading-tight text-muted-foreground">{t}</div>
+              <div className="mt-1 text-[11px] font-medium leading-tight text-muted-foreground">{t(`kpi.${k}`)}</div>
             </div>
           ))}
         </div>
@@ -349,23 +354,23 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
                         <button onClick={() => toggle(o.id)} aria-pressed={on} disabled={!on && chosen.length >= MAX_ROUND}
                           className={cn("ml-auto flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold disabled:opacity-40",
                             on ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground")}>
-                          {on ? <><Check className="h-3.5 w-3.5" strokeWidth={3} />Låda {[...chosen].sort((a, b) => a.localeCompare(b)).indexOf(o.id) + 1}</> : "Lägg i runda"}
+                          {on ? <><Check className="h-3.5 w-3.5" strokeWidth={3} />{t("queue.box", { n: [...chosen].sort((a, b) => a.localeCompare(b)).indexOf(o.id) + 1 })}</> : t("queue.add")}
                         </button>
                       )}
                     </div>
                     <div className="mt-1.5 font-semibold text-card-foreground">{o.cust}</div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Ut senast {o.due}</span>
-                      <span>{o.lines.length} rader · {kolli(o)} kolli</span>
-                      {o.status === "plock" && <span>{doneRows}/{o.lines.length} klara</span>}
+                      <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{t("queue.due", { t: o.due })}</span>
+                      <span>{t("queue.rows", { n: o.lines.length, k: kolli(o) })}</span>
+                      {o.status === "plock" && <span>{t("queue.doneRows", { a: doneRows, b: o.lines.length })}</span>}
                     </div>
                     <div className="mt-3 flex items-center gap-2">
                       <Pill s={o.status} />
                       <div className="flex-1" />
-                      {o.status === "ny" && !chosen.length && <Button className="h-11 px-5 text-[15px] font-bold" disabled={!!active} onClick={() => onStart([o.id])}>Starta plock</Button>}
-                      {mine && <Button className="h-11 px-5 text-[15px] font-bold" onClick={onOpen}>Fortsätt</Button>}
-                      {o.status === "plock" && !mine && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Lock className="h-3.5 w-3.5" />Låst av {o.picker}</span>}
-                      {(o.status === "pack" || o.status === "avv") && o.doneAt && o.startedAt && <span className="text-sm text-muted-foreground">{o.picker} · {mins(o.doneAt - o.startedAt)} min</span>}
+                      {o.status === "ny" && !chosen.length && <Button className="h-11 px-5 text-[15px] font-bold" disabled={!!active} onClick={() => onStart([o.id])}>{t("queue.start")}</Button>}
+                      {mine && <Button className="h-11 px-5 text-[15px] font-bold" onClick={onOpen}>{t("queue.continue")}</Button>}
+                      {o.status === "plock" && !mine && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Lock className="h-3.5 w-3.5" />{t("queue.locked", { name: o.picker ?? "" })}</span>}
+                      {(o.status === "pack" || o.status === "avv") && o.doneAt && o.startedAt && <span className="text-sm text-muted-foreground">{o.picker} · {t("common.min", { n: mins(o.doneAt - o.startedAt) })}</span>}
                     </div>
                   </article>
                 )
@@ -373,23 +378,23 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
             </div>
           </section>
         ))}
-        {active && <p className="mt-4 text-sm text-muted-foreground">Du har en runda igång. Avsluta eller släpp den innan du tar nästa.</p>}
-        {!active && !chosen.length && cnt("ny") > 1 && <p className="mt-4 text-sm text-muted-foreground">Tips: välj upp till {MAX_ROUND} order med "Lägg i runda" och plocka dem i samma vända, en låda per order.</p>}
-        <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">Demo med påhittade order och artiklar. Inget här kommer från DPJ:s system.</p>
+        {active && <p className="mt-4 text-sm text-muted-foreground">{t("queue.active")}</p>}
+        {!active && !chosen.length && cnt("ny") > 1 && <p className="mt-4 text-sm text-muted-foreground">{t("queue.tip", { n: MAX_ROUND })}</p>}
+        <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">{t("queue.demo")}</p>
         <div className="mt-3 flex justify-center gap-5">
-          <a className="text-sm text-muted-foreground underline" href="/etiketter.html">Streckkoder för demo</a>
-          {user.role === "ledare" && <a className="text-sm text-muted-foreground underline" href="/admin.html">Översikt</a>}
-          <button className="text-sm text-muted-foreground underline" onClick={onReset}>Återställ demodata</button>
+          <a className="text-sm text-muted-foreground underline" href="/etiketter.html">{t("link.labels")}</a>
+          {user.role === "ledare" && <a className="text-sm text-muted-foreground underline" href="/admin.html">{t("link.admin")}</a>}
+          <button className="text-sm text-muted-foreground underline" onClick={onReset}>{t("link.reset")}</button>
         </div>
       </main>
       {chosen.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-card px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
           <div className="mx-auto flex max-w-xl items-center gap-3">
             <div className="min-w-0 flex-1 text-sm leading-tight">
-              <div className="font-bold">{chosen.length} order i rundan</div>
-              <div className="text-muted-foreground">{chosen.reduce((n, id) => n + kolli(orders.find(o => o.id === id)!), 0)} kolli · <button className="underline" onClick={() => setPicked([])}>Rensa</button></div>
+              <div className="font-bold">{t("round.n", { n: chosen.length })}</div>
+              <div className="text-muted-foreground">{t("round.kolli", { n: chosen.reduce((n, id) => n + kolli(orders.find(o => o.id === id)!), 0) })} · <button className="underline" onClick={() => setPicked([])}>{t("round.clear")}</button></div>
             </div>
-            <Button className="h-12 px-5 text-[15px] font-bold" onClick={() => onStart(chosen)}>Starta plockrunda</Button>
+            <Button className="h-12 px-5 text-[15px] font-bold" onClick={() => onStart(chosen)}>{t("round.start")}</Button>
           </div>
         </div>
       )}
@@ -401,7 +406,7 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
 
 const BOX = ["", "bg-sky-200 text-sky-950", "bg-amber-200 text-amber-950", "bg-emerald-200 text-emerald-950", "bg-rose-200 text-rose-950"]
 const Box = ({ n, className }: { n: number; className?: string }) =>
-  <span className={cn("inline-grid h-6 min-w-6 place-items-center rounded px-1 text-xs font-extrabold", BOX[n], className)} aria-label={`Låda ${n}`}>{n}</span>
+  <span className={cn("inline-grid h-6 min-w-6 place-items-center rounded px-1 text-xs font-extrabold", BOX[n], className)} aria-label={t("queue.box", { n })}>{n}</span>
 
 function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, onDeviation, onFinish, onRelease }: {
   r: Round; products: Products; sel: number | null; setSel: (n: number | null) => void; shakeN: number
@@ -429,12 +434,12 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
   return (
     <>
       <Header>
-        <Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />Kö</Button>
+        <Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />{t("queue.back")}</Button>
         <div className="flex-1" />
         <div className="min-w-0 text-right">
           {multi ? (
             <>
-              <div className="text-sm font-bold">Plockrunda, {r.orders.length} order</div>
+              <div className="text-sm font-bold">{t("pick.round", { n: r.orders.length })}</div>
               <div className="truncate font-mono text-[13px] text-muted-foreground">{r.orders.map(x => `#${x.id}`).join(" ")}</div>
             </>
           ) : (
@@ -447,8 +452,8 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
       </Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-4 flex justify-between text-sm tabular-nums text-muted-foreground">
-          <span>{done} av {lines.length} rader</span>
-          {(() => { const first = [...r.orders].sort((a, b) => a.due.localeCompare(b.due))[0]; return <span className="flex items-center gap-1.5"><ShipBadge o={first} />ut {first.due}</span> })()}
+          <span>{t("pick.rows", { a: done, b: lines.length })}</span>
+          {(() => { const first = [...r.orders].sort((a, b) => a.due.localeCompare(b.due))[0]; return <span className="flex items-center gap-1.5"><ShipBadge o={first} />{t("pick.out", { t: first.due })}</span> })()}
         </div>
         <Progress value={done / Math.max(1, lines.length) * 100} className="mt-2 h-2 bg-secondary [&>div]:bg-ok" />
 
@@ -457,19 +462,19 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
             <div ref={curRef} className="mt-4 overflow-hidden rounded-md border bg-card">
               <div className={cn("flex", line.locOk ? "bg-ok text-white" : "bg-sign text-sign-foreground")}>
                 <div className="flex-1 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Hyllplats{line.locOk && " · bekräftad"}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{line.locOk ? t("pick.shelfOk") : t("pick.shelf")}</div>
                   <div className="text-[52px] font-extrabold leading-none tracking-tight tabular-nums">
                     <span className={line.locOk ? "" : "text-sign-accent"}>{p.loc.split("-")[0]}</span>-{p.loc.split("-").slice(1).join("-")}
                   </div>
                 </div>
                 <div className="border-l border-white/20 px-4 py-3 text-right">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">Antal</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-75">{t("pick.qty")}</div>
                   <div className="text-[46px] font-extrabold leading-none tabular-nums">{line.qty}</div>
                 </div>
               </div>
               {multi && lineOrder && (
                 <div className={cn("flex items-center gap-3 px-4 py-2", BOX[line.box])}>
-                  <span className="whitespace-nowrap text-2xl font-extrabold">Lägg i låda {line.box}</span>
+                  <span className="whitespace-nowrap text-2xl font-extrabold">{t("pick.box", { n: line.box })}</span>
                   <span className="ml-auto min-w-0 truncate text-right text-sm font-semibold">#{lineOrder.id}<span className="block truncate font-normal">{lineOrder.cust}</span></span>
                 </div>
               )}
@@ -480,56 +485,56 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
                   <div className="text-lg font-bold leading-tight text-card-foreground">{p.name}</div>
                   <div className="mt-1"><span className="rounded bg-accent px-1.5 py-0.5 text-[16px] font-bold text-accent-foreground">{p.variant}</span></div>
                   <div className="mt-1.5 break-all font-mono text-xs text-muted-foreground">{line.sku} · EAN {p.ean}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">Saldo på hyllan: {p.stock} st</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{t("pick.stock", { n: p.stock })}</div>
                 </div>
               </div>
               <div className="grid grid-cols-2 border-t text-sm">
                 <div className={cn("flex items-center gap-2 px-4 py-2.5", step === 1 ? "bg-warn-soft font-bold text-foreground" : "text-muted-foreground")}>
                   <span className={cn("grid h-6 w-6 place-items-center rounded-full border-2 text-xs font-bold", step === 1 ? "border-warn text-warn" : "border-ok bg-ok text-white")}>{step === 1 ? "1" : <Check className="h-3.5 w-3.5" strokeWidth={3} />}</span>
-                  Skanna hyllan
+                  {t("pick.step1")}
                 </div>
                 <div className={cn("flex items-center gap-2 border-l px-4 py-2.5", step === 2 ? "bg-warn-soft font-bold text-foreground" : "text-muted-foreground")}>
                   <span className={cn("grid h-6 w-6 place-items-center rounded-full border-2 text-xs font-bold", step === 2 ? "border-warn text-warn" : "border-border")}>2</span>
-                  Skanna varan
+                  {t("pick.step2")}
                   {step === 2 && <span className="ml-auto text-lg font-extrabold tabular-nums">{line.picked}/{line.qty}</span>}
                 </div>
               </div>
             </div>
 
-            <ScanBar placeholder={step === 1 ? "Skanna hylletikett" : "Skanna varans streckkod"} onScan={onScan} onNoCamera={onNoCamera}
-              hint={step === 1 ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} focusKey={`${i}-${line.locOk}-${line.picked}`} />
+            <ScanBar placeholder={step === 1 ? t("scan.shelf") : t("scan.item")} onScan={onScan} onNoCamera={onNoCamera}
+              hint={step === 1 ? t("hint.shelf") : t("hint.item")} focusKey={`${i}-${line.locOk}-${line.picked}`} />
 
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <span className="text-[13px] text-muted-foreground">Testa:</span>
+              <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
               {step === 1 ? (
                 <>
-                  <Chip onClick={() => onScan(p.loc)}>Rätt hylla <code className="font-mono text-xs text-muted-foreground">{p.loc}</code></Chip>
-                  {wrongLoc && <Chip bad onClick={() => onScan(wrongLoc.loc)}>Fel hylla <code className="font-mono text-xs">{wrongLoc.loc}</code></Chip>}
+                  <Chip onClick={() => onScan(p.loc)}>{t("chip.rightShelf")} <code className="font-mono text-xs text-muted-foreground">{p.loc}</code></Chip>
+                  {wrongLoc && <Chip bad onClick={() => onScan(wrongLoc.loc)}>{t("chip.wrongShelf")} <code className="font-mono text-xs">{wrongLoc.loc}</code></Chip>}
                 </>
               ) : (
                 <>
-                  <Chip onClick={() => onScan(p.ean)}>Rätt vara</Chip>
-                  {otherEan && <Chip bad onClick={() => onScan(otherEan)}>{sib ? `Fel variant: ${sib.variant}` : "Fel vara"}</Chip>}
+                  <Chip onClick={() => onScan(p.ean)}>{t("chip.rightItem")}</Chip>
+                  {otherEan && <Chip bad onClick={() => onScan(otherEan)}>{sib ? t("chip.wrongVariant", { v: sib.variant }) : t("chip.wrongItem")}</Chip>}
                 </>
               )}
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <Button variant="outline" className="h-12 text-[15px] font-semibold" onClick={onDeviation}><AlertTriangle className="!h-4 !w-4" />Avvikelse</Button>
+              <Button variant="outline" className="h-12 text-[15px] font-semibold" onClick={onDeviation}><AlertTriangle className="!h-4 !w-4" />{t("pick.dev")}</Button>
               <Button variant="outline" className="h-12 text-[15px] font-semibold" disabled={left < 2}
                 onClick={() => { const n = lines.findIndex((l, k) => k > i && !lineDone(l)); setSel(n >= 0 ? n : lines.findIndex((l, k) => k !== i && !lineDone(l))) }}>
-                Ta nästa rad
+                {t("pick.next")}
               </Button>
             </div>
           </>
         ) : (
           <div className="mt-6">
-            <div className="flex items-center gap-2 text-3xl font-extrabold tracking-tight"><PackageCheck className="h-8 w-8 text-ok" />Alla rader är plockade</div>
-            <Button className="mt-4 h-12 w-full text-base font-bold" onClick={onFinish}>Granska och skicka till pack</Button>
+            <div className="flex items-center gap-2 text-3xl font-extrabold tracking-tight"><PackageCheck className="h-8 w-8 text-ok" />{t("pick.allDone")}</div>
+            <Button className="mt-4 h-12 w-full text-base font-bold" onClick={onFinish}>{t("pick.review")}</Button>
           </div>
         )}
 
-        <h2 className="mb-2 mt-7 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Plocklista i gångordning</h2>
+        <h2 className="mb-2 mt-7 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("pick.list")}</h2>
         <div className="overflow-hidden rounded-md border bg-card">
           {lines.map((l, k) => {
             const q = products[l.sku]; const isDone = lineDone(l)
@@ -543,13 +548,13 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
                   <span className="block truncate text-muted-foreground">{q?.variant}</span>
                 </span>
                 <span className="text-[15px] font-bold tabular-nums">
-                  {l.dev ? <span className="text-destructive">{l.dev.kind}</span> : isDone ? <span className="flex items-center gap-1 text-ok"><Check className="h-4 w-4" strokeWidth={3} />{l.picked}</span> : `${l.picked}/${l.qty}`}
+                  {l.dev ? <span className="text-destructive">{t(`dev.${l.dev.kind}`)}</span> : isDone ? <span className="flex items-center gap-1 text-ok"><Check className="h-4 w-4" strokeWidth={3} />{l.picked}</span> : `${l.picked}/${l.qty}`}
                 </span>
               </button>
             )
           })}
         </div>
-        {line && <div className="mt-6 text-center"><button className="text-sm text-muted-foreground underline" onClick={onRelease}>{multi ? "Släpp rundan tillbaka till kön" : "Släpp ordern tillbaka till kön"}</button></div>}
+        {line && <div className="mt-6 text-center"><button className="text-sm text-muted-foreground underline" onClick={onRelease}>{multi ? t("pick.releaseRound") : t("pick.release")}</button></div>}
       </main>
     </>
   )
@@ -586,37 +591,37 @@ function DeviationSheet({ open, onOpenChange, line, products, onSave }: {
       <SheetContent side="bottom" className="mx-auto max-h-[92vh] max-w-xl overflow-auto rounded-t-xl pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
         <form className="grid gap-4" onSubmit={e => { e.preventDefault(); onSave(kind, found, note.trim(), photo) }}>
           <SheetHeader className="text-left">
-            <SheetTitle className="text-2xl font-extrabold">Avvikelse på {p.loc}</SheetTitle>
+            <SheetTitle className="text-2xl font-extrabold">{t("dev.title", { loc: p.loc })}</SheetTitle>
             <SheetDescription>{p.name}, {p.variant}</SheetDescription>
           </SheetHeader>
-          <ToggleGroup type="single" value={kind} onValueChange={v => v && setKind(v as DeviationKind)} className="grid grid-cols-3 gap-1.5" aria-label="Typ av avvikelse">
+          <ToggleGroup type="single" value={kind} onValueChange={v => v && setKind(v as DeviationKind)} className="grid grid-cols-3 gap-1.5" aria-label={t("pick.dev")}>
             {DEVIATION_KINDS.map(k => (
-              <ToggleGroupItem key={k} value={k} className="h-12 border font-semibold data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">{k}</ToggleGroupItem>
+              <ToggleGroupItem key={k} value={k} className="h-12 border font-semibold data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">{t(`dev.${k}`)}</ToggleGroupItem>
             ))}
           </ToggleGroup>
           <div className="grid gap-1.5">
-            <span className="text-sm text-muted-foreground">Hittade antal (av {line.qty})</span>
+            <span className="text-sm text-muted-foreground">{t("dev.found", { n: line.qty })}</span>
             <div className="flex items-center gap-3">
-              <Button type="button" variant="outline" className="h-12 w-12" aria-label="Minska" onClick={() => setFound(Math.max(0, found - 1))}><Minus /></Button>
+              <Button type="button" variant="outline" className="h-12 w-12" aria-label={t("common.dec")} onClick={() => setFound(Math.max(0, found - 1))}><Minus /></Button>
               <output className="min-w-10 text-center text-3xl font-extrabold tabular-nums">{found}</output>
-              <Button type="button" variant="outline" className="h-12 w-12" aria-label="Öka" onClick={() => setFound(Math.min(line.qty, found + 1))}><Plus /></Button>
+              <Button type="button" variant="outline" className="h-12 w-12" aria-label={t("common.inc")} onClick={() => setFound(Math.min(line.qty, found + 1))}><Plus /></Button>
             </div>
           </div>
           <div className="grid gap-1.5">
-            <span className="text-sm text-muted-foreground">Foto</span>
+            <span className="text-sm text-muted-foreground">{t("dev.photo")}</span>
             <div className="flex items-center gap-3">
-              {preview && <img src={preview} alt="Foto på avvikelsen" className="h-[72px] w-[72px] rounded object-cover" />}
-              <label htmlFor="devphoto" className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md border px-4 font-semibold"><Camera className="h-4 w-4" />{photo ? "Ta nytt foto" : "Ta foto"}</label>
+              {preview && <img src={preview} alt={t("dev.photoAlt")} className="h-[72px] w-[72px] rounded object-cover" />}
+              <label htmlFor="devphoto" className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md border px-4 font-semibold"><Camera className="h-4 w-4" />{photo ? t("dev.retake") : t("dev.take")}</label>
               <input id="devphoto" type="file" accept="image/*" capture="environment" hidden onChange={e => onFile(e.target.files?.[0])} />
             </div>
           </div>
           <label className="grid gap-1.5" htmlFor="devnote">
-            <span className="text-sm text-muted-foreground">Kommentar</span>
-            <Textarea id="devnote" rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="T.ex. tom plats, trasig kartong" className="text-base" />
+            <span className="text-sm text-muted-foreground">{t("dev.note")}</span>
+            <Textarea id="devnote" rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder={t("dev.notePh")} className="text-base" />
           </label>
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="outline" className="h-12 font-semibold" onClick={() => onOpenChange(false)}>Avbryt</Button>
-            <Button type="submit" className="h-12 font-bold">Flagga raden</Button>
+            <Button type="button" variant="outline" className="h-12 font-semibold" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" className="h-12 font-bold">{t("dev.save")}</Button>
           </div>
         </form>
       </SheetContent>
@@ -631,16 +636,16 @@ function Done({ r, products, onBack, onSend }: { r: Round; products: Products; o
   const devs = r.lines.filter(l => l.dev)
   const start = Math.min(...r.orders.map(o => o.startedAt || Date.now()))
   const rows: [string, string][] = [
-    ...(multi ? [] : [["Order", `#${r.orders[0].id}`], ["Kund", r.orders[0].cust]] as [string, string][]),
-    ["Kolli plockade", `${r.lines.reduce((n, l) => n + l.picked, 0)} av ${r.orders.reduce((n, o) => n + kolli(o), 0)}`],
-    ["Plockare", r.orders[0].picker || ""], ["Tid", `${mins(Date.now() - start)} min`],
-    ...(multi ? [] : [["Leverans", `${r.orders[0].shipTxt}, ut ${r.orders[0].due}`]] as [string, string][]),
+    ...(multi ? [] : [[t("done.order"), `#${r.orders[0].id}`], [t("done.cust"), r.orders[0].cust]] as [string, string][]),
+    [t("done.kolli"), t("done.of", { a: r.lines.reduce((n, l) => n + l.picked, 0), b: r.orders.reduce((n, o) => n + kolli(o), 0) })],
+    [t("done.picker"), r.orders[0].picker || ""], [t("done.time"), t("common.min", { n: mins(Date.now() - start) })],
+    ...(multi ? [] : [[t("done.ship"), t("done.shipVal", { txt: r.orders[0].shipTxt, due: r.orders[0].due })]] as [string, string][]),
   ]
   return (
     <>
-      <Header><Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />Plocklista</Button></Header>
+      <Header><Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />{t("done.back")}</Button></Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
-        <h1 className="mt-6 text-[34px] font-extrabold leading-tight tracking-tight">{devs.length ? "Plockad med avvikelse" : "Komplett plockad"}</h1>
+        <h1 className="mt-6 text-[34px] font-extrabold leading-tight tracking-tight">{devs.length ? t("done.dev") : t("done.ok")}</h1>
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border bg-card p-4 tabular-nums">
           {rows.map(([k, v]) => (<Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="m-0 text-right font-semibold">{v}</dd></Fragment>))}
         </dl>
@@ -649,7 +654,7 @@ function Done({ r, products, onBack, onSend }: { r: Round; products: Products; o
             {r.orders.map((o, k) => (
               <div key={o.id} className="flex items-center gap-3 border-t px-4 py-2.5 text-sm first:border-t-0">
                 <Box n={k + 1} />
-                <span className="min-w-0 flex-1"><b className="font-mono">#{o.id}</b> {o.cust}<span className="block text-muted-foreground">{o.shipTxt}, ut {o.due}</span></span>
+                <span className="min-w-0 flex-1"><b className="font-mono">#{o.id}</b> {o.cust}<span className="block text-muted-foreground">{t("done.shipVal", { txt: o.shipTxt, due: o.due })}</span></span>
                 <span className={cn("font-semibold tabular-nums", o.lines.some(l => l.dev) && "text-destructive")}>{o.lines.reduce((n, l) => n + l.picked, 0)}/{kolli(o)}</span>
               </div>
             ))}
@@ -660,11 +665,11 @@ function Done({ r, products, onBack, onSend }: { r: Round; products: Products; o
             {devs.map(l => { const p = products[l.sku]; return (
               <div key={l.id} className="flex items-center gap-3 rounded-md bg-bad-soft p-3 text-sm">
                 {l.dev!.photo && <img src={l.dev!.photo} alt="" className="h-14 w-14 rounded object-cover" />}
-                <div><b className="text-destructive">{l.dev!.kind}</b> · {multi && `#${l.orderId} · `}{p.loc} · {p.name}, {p.variant}<br />Hittade {l.dev!.found} av {l.qty}{l.dev!.note && ` · ${l.dev!.note}`}</div>
+                <div><b className="text-destructive">{t(`dev.${l.dev!.kind}`)}</b> · {multi && `#${l.orderId} · `}{p.loc} · {p.name}, {p.variant}<br />{t("done.found", { a: l.dev!.found, b: l.qty })}{l.dev!.note && ` · ${l.dev!.note}`}</div>
               </div>) })}
           </div>
         )}
-        <Button className="mt-5 h-12 w-full bg-ok text-base font-bold text-white hover:bg-ok/90" onClick={onSend}>{multi ? `Skicka ${r.orders.length} order till pack` : "Skicka till pack"}</Button>
+        <Button className="mt-5 h-12 w-full bg-ok text-base font-bold text-white hover:bg-ok/90" onClick={onSend}>{multi ? t("done.sendMany", { n: r.orders.length }) : t("done.send")}</Button>
       </main>
     </>
   )
