@@ -4,8 +4,11 @@ import { AlertTriangle, Camera, Clock, PackageCheck, Timer, Truck, Users, Zap } 
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { PICKERS, kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status } from "./data"
+import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status } from "./data"
 import { createStore } from "./store"
+import { USERS, currentUser, logout, type User } from "./auth"
+import Login, { Logo } from "./Login"
+import { Button } from "@/components/ui/button"
 
 const store = createStore()
 
@@ -23,15 +26,6 @@ const picked = (o: Order) => o.lines.reduce((n, l) => n + l.picked, 0)
 const pickTime = (o: Order) => (o.startedAt && o.doneAt ? o.doneAt - o.startedAt : null)
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 const clock = (ms: number) => new Date(ms).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })
-
-function Logo() {
-  return (
-    <div className="flex select-none items-baseline gap-1.5 text-logo" aria-label="DPJ Workspace">
-      <span className="text-[26px] font-extrabold leading-none tracking-[-0.02em]">DPJ</span>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.28em]">Workspace</span>
-    </div>
-  )
-}
 
 function Kpi({ icon, label, value, sub, tone }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: "ok" | "bad" | "warn" }) {
   return (
@@ -52,6 +46,24 @@ const Section = ({ title, children, right }: { title: string; children: ReactNod
 )
 
 export default function Admin() {
+  const [user, setUser] = useState<User | null>(currentUser)
+  const out = () => { logout(); setUser(null) }
+  if (!user) return <Login only="ledare" title="Logga in som arbetsledare" onLogin={setUser} />
+  if (user.role !== "ledare") return (
+    <div className="mx-auto max-w-sm px-4 py-10">
+      <Logo />
+      <h1 className="mt-8 text-2xl font-extrabold">Bara för arbetsledare</h1>
+      <p className="mt-2 text-muted-foreground">Du är inloggad som {user.name}, som är plockare. Översikten visas bara för arbetsledare.</p>
+      <div className="mt-6 flex gap-2">
+        <Button onClick={out}>Byt användare</Button>
+        <Button variant="outline" asChild><a href="/">Till plockappen</a></Button>
+      </div>
+    </div>
+  )
+  return <Overview user={user} onLogout={out} />
+}
+
+function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -74,7 +86,7 @@ export default function Admin() {
   const deviations = orders.flatMap(o => o.lines.filter(l => l.dev).map(l => ({ o, l, p: products[l.sku] })))
   const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
 
-  const pickers = [...new Set([...PICKERS, ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
+  const pickers = [...new Set([...USERS.filter(u => u.role === "plock").map(u => u.name), ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
     const mine = done.filter(o => o.picker === name)
     return {
       name,
@@ -98,6 +110,7 @@ export default function Admin() {
             {store.mode === "supabase" ? "Live, uppdateras av sig själv" : "Lokal demo, bara den här webbläsaren"}
           </span>
           <a href="/" className="text-sm text-muted-foreground underline">Till plockappen</a>
+          <span className="text-sm">{user.name} <button className="ml-1 text-muted-foreground underline" onClick={onLogout}>Logga ut</button></span>
         </div>
       </header>
       {error && <div className="bg-bad-soft px-4 py-2 text-center text-sm text-destructive">{error}</div>}
@@ -225,7 +238,7 @@ export default function Admin() {
         </Section>
 
         <p className="text-sm text-muted-foreground">
-          Påhittade order. Innan skarp drift ska sidan ligga bakom inloggning så att bara arbetsledare ser den.
+          Påhittade order. Inloggningen är simulerad i demon. Inför skarp drift ersätts den med riktig inloggning.
         </p>
       </main>
     </div>

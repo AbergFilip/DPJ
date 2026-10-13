@@ -4,15 +4,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import {
-  DEVIATION_KINDS, PICKERS, kolli, lineDone, mins, sortByLoc,
+  DEVIATION_KINDS, kolli, lineDone, mins, sortByLoc,
   type DeviationKind, type Line, type Order, type ProductType, type Products, type Snapshot, type Status,
 } from "./data"
 import { createStore } from "./store"
+import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
+import Login, { Logo } from "./Login"
 
 const store = createStore()
 // Kameraskannern (zxing) är stor, så den laddas först när någon trycker på kameraknappen.
@@ -44,16 +45,6 @@ const Pict = ({ type, className }: { type: ProductType; className?: string }) =>
     className={className} dangerouslySetInnerHTML={{ __html: ICON[type] ?? "" }} aria-hidden="true" />
 )
 
-function Logo() {
-  // Ordbild i DPJ:s grå logofärg. Byt mot DPJ:s riktiga SVG-logga inför en skarp demo.
-  return (
-    <div className="flex select-none items-baseline gap-1.5 text-logo" aria-label="DPJ Workspace">
-      <span className="text-[26px] font-extrabold leading-none tracking-[-0.02em]">DPJ</span>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.28em]">Workspace</span>
-    </div>
-  )
-}
-
 let actx: AudioContext | undefined
 function feedback(kind: FlashKind) {
   try { navigator.vibrate?.(kind === "err" ? [120, 60, 120, 60, 220] : kind === "ok" ? 40 : 80) } catch { /* ok */ }
@@ -67,8 +58,6 @@ function feedback(kind: FlashKind) {
   } catch { /* ok */ }
 }
 
-const loadMe = () => { try { return localStorage.getItem("dpj-plock-me") || PICKERS[0] } catch { return PICKERS[0] } }
-
 function currentLine(o: Order, products: Products, sel: number | null) {
   const lines = sortByLoc(o.lines, products)
   const i = sel != null && lines[sel] && !lineDone(lines[sel]) ? sel : lines.findIndex(l => !lineDone(l))
@@ -76,8 +65,13 @@ function currentLine(o: Order, products: Products, sel: number | null) {
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(currentUser)
+  return user ? <Picking user={user} onLogout={() => { logout(); setUser(null) }} /> : <Login onLogin={setUser} />
+}
+
+function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const me = user.name
   const [snap, setSnap] = useState<Snapshot | null>(null)
-  const [me, setMeState] = useState(loadMe)
   const [view, setView] = useState<View>({ name: "queue" })
   const [sel, setSel] = useState<number | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -92,7 +86,6 @@ export default function App() {
     return () => clearTimeout(t)
   }, [flash])
 
-  const setMe = (m: string) => { setMeState(m); try { localStorage.setItem("dpj-plock-me", m) } catch { /* ok */ } }
   function say(kind: FlashKind, title: string, sub?: string, sticky?: boolean) { setFlash({ kind, title, sub, sticky, n: Date.now() }); feedback(kind) }
   const go = (v: View) => { setView(v); setSel(null); window.scrollTo(0, 0) }
   const once = async (fn: () => Promise<void>) => {
@@ -143,7 +136,7 @@ export default function App() {
     <div className="min-h-full">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
       {view.name === "queue" && (
-        <Queue orders={orders} me={me} setMe={setMe}
+        <Queue orders={orders} user={user} onLogout={onLogout}
           onStart={id => once(async () => {
             if (await store.claim(id, me)) go({ name: "pick", id })
             else say("warn", "Ordern är redan tagen", "Någon annan hann före, eller så har du en order igång.")
@@ -242,9 +235,10 @@ function ShipBadge({ o }: { o: Order }) {
 
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
-  orders: Order[]; me: string; setMe: (m: string) => void; onStart: (id: string) => void; onOpen: (id: string) => void; onReset: () => void
+function Queue({ orders, user, onLogout, onStart, onOpen, onReset }: {
+  orders: Order[]; user: User; onLogout: () => void; onStart: (id: string) => void; onOpen: (id: string) => void; onReset: () => void
 }) {
+  const me = user.name
   const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
   const list = [...orders].sort((a, b) => rank(a) - rank(b) || a.due.localeCompare(b.due))
   const cnt = (k: Status) => orders.filter(o => o.status === k).length
@@ -261,14 +255,15 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
         <Logo />
         <span className="ml-1 rounded bg-primary px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary-foreground">Plock</span>
         <div className="flex-1" />
-        <Select value={me} onValueChange={setMe}>
-          <SelectTrigger className="h-9 w-[118px] font-semibold" aria-label="Plockare"><SelectValue /></SelectTrigger>
-          <SelectContent>{PICKERS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-        </Select>
+        <div className="text-right leading-tight">
+          <div className="font-semibold">{me}</div>
+          <button className="text-xs text-muted-foreground underline" onClick={onLogout}>Logga ut</button>
+        </div>
       </Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-5 flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Hej {me}!</h1>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ROLE_LABEL[user.role]}</span>
           <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold", store.mode === "supabase" ? "text-ok" : "text-muted-foreground")}>
             <span className={cn("h-2 w-2 rounded-full", store.mode === "supabase" ? "bg-ok" : "bg-muted-foreground")} />
             {store.mode === "supabase" ? "Live, delas med alla" : "Lokal demo"}
@@ -320,7 +315,7 @@ function Queue({ orders, me, setMe, onStart, onOpen, onReset }: {
         <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">Demo med påhittade order och artiklar. Inget här kommer från DPJ:s system.</p>
         <div className="mt-3 flex justify-center gap-5">
           <a className="text-sm text-muted-foreground underline" href="/etiketter.html">Streckkoder för demo</a>
-          <a className="text-sm text-muted-foreground underline" href="/admin.html">Översikt</a>
+          {user.role === "ledare" && <a className="text-sm text-muted-foreground underline" href="/admin.html">Översikt</a>}
           <button className="text-sm text-muted-foreground underline" onClick={onReset}>Återställ demodata</button>
         </div>
       </main>

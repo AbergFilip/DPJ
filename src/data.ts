@@ -13,7 +13,6 @@ export interface Order {
 export type Products = Record<string, Product>
 export interface Snapshot { products: Products; orders: Order[] }
 
-export const PICKERS = ["Sara", "Amir", "Jonna", "Mikael"]
 export const DEVIATION_KINDS: DeviationKind[] = ["Saknas", "Skadad", "Fel saldo"]
 
 const P = (sku: string, name: string, variant: string, ean: string, loc: string, type: ProductType, brand?: string): Product =>

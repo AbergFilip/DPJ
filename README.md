@@ -23,7 +23,7 @@ Kameran kräver https, vilket Vercel och Netlify ger automatiskt.
 
 Schema, funktioner och demodata ligger i `supabase/migrations/`. Alla skrivningar går via funktioner som kontrollerar att plockaren äger ordern, så två plockare kan inte ta samma order.
 
-Inloggning saknas i prototypen: plockaren väljs i listan. Innan riktig drift behövs inloggning per plockare (Supabase Auth) och att funktionerna läser plockaren från inloggningen i stället för från anropet.
+Inloggningen är simulerad: man väljer namn och skriver PIN 1234. Plockare (Sara, Amir, Jonna, Mikael) ser plockappen, arbetsledaren (Lena) ser även översikten på `/admin.html`. Allt kontrolleras bara i webbläsaren. Innan riktig drift behövs Supabase Auth och att funktionerna läser användaren från inloggningen i stället för från anropet.
 
 ## Teknik
 
