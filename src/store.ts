@@ -2,7 +2,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   SEED_PRODUCTS, lineDone, seedOrders,
-  type DeviationKind, type Order, type Products, type Product, type Snapshot, type Status,
+  type DeviationKind, type Order, type Products, type Product, type Snapshot, type Status, type StockMove,
 } from "./data"
 import type { NewOrder } from "./csv"
 
@@ -16,22 +16,34 @@ export interface Store {
   reportDeviation(lineId: string, picker: string, kind: DeviationKind, found: number, note: string, photo: Blob | null): Promise<boolean>
   finish(orderId: string, picker: string): Promise<Status | null>
   importOrders(orders: NewOrder[]): Promise<number>
+  receive(sku: string, qty: number, who: string): Promise<number | null>
   reset(): Promise<void>
 }
 
 /* ---------- Lokalt (demo utan server) ---------- */
 
 const KEY = "dpj-plock-local-v3"
+const STOCK_KEY = "dpj-plock-local-stock-v1"
+const seedStock = () => ({ products: structuredClone(SEED_PRODUCTS), moves: [] as StockMove[] })
 
 function localStore(): Store {
   let orders: Order[]
   try { orders = JSON.parse(localStorage.getItem(KEY) || "null") } catch { orders = null as unknown as Order[] }
   if (!Array.isArray(orders)) orders = seedOrders()
+  let stock: ReturnType<typeof seedStock>
+  try { stock = JSON.parse(localStorage.getItem(STOCK_KEY) || "null") } catch { stock = null as unknown as typeof stock }
+  if (!stock?.products) stock = seedStock()
   const subs = new Set<(s: Snapshot) => void>()
+  const snapshot = (): Snapshot => ({ products: structuredClone(stock.products), orders: structuredClone(orders), moves: [...stock.moves] })
   const emit = () => {
-    try { localStorage.setItem(KEY, JSON.stringify(orders)) } catch { /* privat läge */ }
-    const snap = { products: SEED_PRODUCTS, orders: structuredClone(orders) }
+    try { localStorage.setItem(KEY, JSON.stringify(orders)); localStorage.setItem(STOCK_KEY, JSON.stringify(stock)) } catch { /* privat läge */ }
+    const snap = snapshot()
     subs.forEach(cb => cb(snap))
+  }
+  const move = (sku: string, qty: number, kind: StockMove["kind"], who: string, note: string | null = null) => {
+    const p = stock.products[sku]; if (!p) return
+    p.stock = Math.max(0, p.stock + qty)
+    stock.moves = [{ id: String(Date.now() + Math.random()), sku, qty, kind, who, note, at: Date.now() }, ...stock.moves].slice(0, 30)
   }
   const findLine = (lineId: string, picker: string) => {
     for (const o of orders) {
@@ -43,7 +55,7 @@ function localStore(): Store {
   const toDataUrl = (b: Blob) => new Promise<string>(res => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(b) })
   return {
     mode: "local",
-    subscribe(cb) { subs.add(cb); cb({ products: SEED_PRODUCTS, orders: structuredClone(orders) }); return () => { subs.delete(cb) } },
+    subscribe(cb) { subs.add(cb); cb(snapshot()); return () => { subs.delete(cb) } },
     async claim(id, picker) {
       if (orders.some(o => o.status === "plock" && o.picker === picker)) return false
       const o = orders.find(x => x.id === id)
@@ -61,12 +73,14 @@ function localStore(): Store {
     async pickItem(lineId, picker) {
       const f = findLine(lineId, picker)
       if (!f || !f.l.locOk || f.l.dev || f.l.picked >= f.l.qty) return null
-      f.l.picked++; emit(); return f.l.picked
+      f.l.picked++; move(f.l.sku, -1, "plock", picker); emit(); return f.l.picked
     },
     async reportDeviation(lineId, picker, kind, found, note, photo) {
       const f = findLine(lineId, picker); if (!f) return false
       const n = Math.max(0, Math.min(found, f.l.qty))
-      f.l.picked = n; f.l.dev = { kind, found: n, note, photo: photo ? await toDataUrl(photo) : null }; emit(); return true
+      f.l.picked = n; f.l.dev = { kind, found: n, note, photo: photo ? await toDataUrl(photo) : null }
+      if (kind !== "Skadad") move(f.l.sku, -(stock.products[f.l.sku]?.stock ?? 0), "avvikelse", picker, kind)
+      emit(); return true
     },
     async finish(id, picker) {
       const o = orders.find(x => x.id === id)
@@ -81,13 +95,19 @@ function localStore(): Store {
       })))
       emit(); return fresh.length
     },
-    async reset() { orders = seedOrders(); emit() },
+    async receive(sku, qty, who) {
+      if (!stock.products[sku] || qty < 1 || qty > 999) return null
+      move(sku, qty, "in", who); emit(); return stock.products[sku].stock
+    },
+    async reset() { orders = seedOrders(); stock = seedStock(); emit() },
   }
 }
 
 /* ---------- Supabase ---------- */
 
 interface OrderRow { id: string; cust: string; ship: "exp" | "std"; ship_txt: string; due: string; status: Status; picker: string | null; started_at: string | null; done_at: string | null }
+interface ProductRow extends Omit<Product, "minStock"> { min_stock: number }
+interface MoveRow { id: number; sku: string; qty: number; kind: StockMove["kind"]; who: string | null; note: string | null; at: string }
 interface LineRow { id: number; order_id: string; sku: string; qty: number; picked: number; loc_ok: boolean; dev_kind: DeviationKind | null; dev_found: number | null; dev_note: string | null; dev_photo_url: string | null }
 
 function supabaseStore(sb: SupabaseClient): Store {
@@ -99,14 +119,16 @@ function supabaseStore(sb: SupabaseClient): Store {
 
   const ts = (s: string | null) => (s ? Date.parse(s) : null)
   async function load() {
-    const [p, o, l] = await Promise.all([
-      Object.keys(products).length ? Promise.resolve({ data: null, error: null }) : sb.from("products").select("*"),
+    const [p, o, l, m] = await Promise.all([
+      sb.from("products").select("*"),
       sb.from("orders").select("*"),
       sb.from("order_lines").select("*").order("id"),
+      sb.from("stock_moves").select("*").eq("hidden", false).order("id", { ascending: false }).limit(30),
     ])
-    const err = p.error || o.error || l.error
+    const err = p.error || o.error || l.error || m.error
     if (err) { errs.forEach(cb => cb(err.message)); return }
-    if (p.data) products = Object.fromEntries((p.data as Product[]).map(x => [x.sku, x]))
+    products = Object.fromEntries((p.data as ProductRow[]).map(({ min_stock, ...x }) => [x.sku, { ...x, minStock: min_stock }]))
+    const moves: StockMove[] = (m.data as MoveRow[]).map(x => ({ ...x, id: String(x.id), at: Date.parse(x.at) }))
     const byOrder = new Map<string, LineRow[]>()
     for (const r of l.data as LineRow[]) byOrder.set(r.order_id, [...(byOrder.get(r.order_id) || []), r])
     const orders: Order[] = (o.data as OrderRow[]).map(r => ({
@@ -117,7 +139,7 @@ function supabaseStore(sb: SupabaseClient): Store {
         dev: x.dev_kind ? { kind: x.dev_kind, found: x.dev_found ?? 0, note: x.dev_note ?? "", photo: x.dev_photo_url } : null,
       })),
     }))
-    const snap = { products, orders }
+    const snap = { products, orders, moves }
     subs.forEach(cb => cb(snap))
   }
   const refresh = () => { clearTimeout(timer); timer = setTimeout(load, 120) }
@@ -137,6 +159,8 @@ function supabaseStore(sb: SupabaseClient): Store {
         channel = sb.channel("plock")
           .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, refresh)
           .on("postgres_changes", { event: "*", schema: "public", table: "order_lines" }, refresh)
+          .on("postgres_changes", { event: "*", schema: "public", table: "products" }, refresh)
+          .on("postgres_changes", { event: "*", schema: "public", table: "stock_moves" }, refresh)
           .subscribe()
       }
       load()
@@ -159,6 +183,7 @@ function supabaseStore(sb: SupabaseClient): Store {
     importOrders: list => rpc<number>("import_orders", {
       p_orders: list.map(o => ({ id: o.id, cust: o.cust, ship: o.ship, ship_txt: o.shipTxt, due: o.due, lines: o.lines })),
     }),
+    receive: (sku, qty, who) => rpc<number | null>("receive_goods", { p_sku: sku, p_qty: qty, p_who: who }),
     reset: () => rpc<void>("reset_demo", {}),
   }
 }

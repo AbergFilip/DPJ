@@ -1,5 +1,5 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AlertTriangle, Camera, Check, ChevronLeft, Clock, Keyboard, Lock, Minus, PackageCheck, Plus, ScanLine, Truck, Zap } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { AlertTriangle, Camera, Check, ChevronLeft, Clock, Lock, Minus, PackageCheck, Plus, ScanLine, Truck, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -9,17 +9,18 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import {
   DEVIATION_KINDS, kolli, lineDone, mins, sortByLoc,
-  type DeviationKind, type Line, type Order, type ProductType, type Products, type Snapshot, type Status,
+  type DeviationKind, type Line, type Order, type Products, type Snapshot, type Status,
 } from "./data"
 import { createStore } from "./store"
 import { ROLE_LABEL, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
+import { Chip, Header, Pict, ScanBar } from "./parts"
+import { Inleverans, Saldo } from "./Lager"
 
 const store = createStore()
-// Kameraskannern (zxing) är stor, så den laddas först när någon trycker på kameraknappen.
-const CameraScanner = lazy(() => import("./CameraScanner"))
 
-type View = { name: "queue" } | { name: "pick"; id: string } | { name: "done"; id: string }
+type Tab = "queue" | "inleverans" | "saldo"
+type View = { name: Tab } | { name: "pick"; id: string } | { name: "done"; id: string }
 type FlashKind = "ok" | "err" | "warn"
 interface Flash { kind: FlashKind; title: string; sub?: string; sticky?: boolean; n: number }
 
@@ -29,21 +30,6 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
 }
-
-const ICON: Record<ProductType, string> = {
-  skiva: '<path d="M4 22 L30 14 L44 20 L18 28 Z"/><path d="M4 22 v4 L18 32 v-4 M18 32 L44 24 v-4"/>',
-  stativ: '<path d="M8 12 H40 M14 12 V36 M34 12 V36 M8 36 H20 M28 36 H40"/>',
-  hurts: '<rect x="12" y="6" width="24" height="34" rx="2"/><path d="M12 17 H36 M12 28 H36 M21 11.5 h6 M21 22.5 h6 M21 33.5 h6"/>',
-  stol: '<path d="M16 6 h16 v16 H16 Z M12 26 H36 M24 26 V36 M14 42 L24 36 L34 42"/>',
-  vagg: '<rect x="6" y="10" width="36" height="20" rx="3"/><path d="M14 30 v8 M34 30 v8 M10 38 h8 M30 38 h8"/>',
-  arm: '<rect x="4" y="8" width="16" height="11" rx="1"/><rect x="28" y="8" width="16" height="11" rx="1"/><path d="M12 19 L24 26 L36 19 M24 26 V42 M18 42 H30"/>',
-  ranna: '<path d="M4 18 L4 28 L44 28 L44 18 M4 28 L10 32 L44 32 L44 28"/>',
-  fot: '<path d="M6 32 L40 22 L42 28 L8 38 Z M14 36 v4 M34 26 v8"/>',
-}
-const Pict = ({ type, className }: { type: ProductType; className?: string }) => (
-  <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-    className={className} dangerouslySetInnerHTML={{ __html: ICON[type] ?? "" }} aria-hidden="true" />
-)
 
 let actx: AudioContext | undefined
 function feedback(kind: FlashKind) {
@@ -87,6 +73,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, [flash])
 
   function say(kind: FlashKind, title: string, sub?: string, sticky?: boolean) { setFlash({ kind, title, sub, sticky, n: Date.now() }); feedback(kind) }
+  const noCamera = () => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)
   const go = (v: View) => { setView(v); setSel(null); window.scrollTo(0, 0) }
   const once = async (fn: () => Promise<void>) => {
     if (busy.current) return
@@ -96,7 +83,8 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   if (!snap) return <div className="grid min-h-screen place-items-center text-muted-foreground">Hämtar order…</div>
   const { products, orders } = snap
-  const order = view.name !== "queue" ? orders.find(o => o.id === view.id) : undefined
+  const order = "id" in view ? orders.find(o => o.id === view.id) : undefined
+  const tab = "id" in view ? null : view.name
 
   async function handleScan(raw: string) {
     if (!order) return
@@ -135,8 +123,14 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
   return (
     <div className="min-h-full">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
+      {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => go({ name: t })} />}
+      {view.name === "inleverans" && (
+        <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera}
+          onReceive={(sku, qty) => store.receive(sku, qty, me)} />
+      )}
+      {view.name === "saldo" && <Saldo products={products} orders={orders} />}
       {view.name === "queue" && (
-        <Queue orders={orders} user={user} onLogout={onLogout}
+        <Queue orders={orders} user={user}
           onStart={id => once(async () => {
             if (await store.claim(id, me)) go({ name: "pick", id })
             else say("warn", "Ordern är redan tagen", "Någon annan hann före, eller så har du en order igång.")
@@ -144,13 +138,13 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
           onOpen={id => go({ name: "pick", id })}
           onReset={() => once(async () => { await store.reset(); say("ok", "Demodata återställd") })} />
       )}
-      {view.name !== "queue" && !order && <p className="p-6 text-muted-foreground">Ordern finns inte längre. <button className="underline" onClick={() => go({ name: "queue" })}>Till kön</button></p>}
+      {"id" in view && !order && <p className="p-6 text-muted-foreground">Ordern finns inte längre. <button className="underline" onClick={() => go({ name: "queue" })}>Till kön</button></p>}
       {view.name === "pick" && order && (
         <>
           <Pick o={order} products={products} sel={sel} setSel={setSel} shakeN={shakeN}
             onBack={() => go({ name: "queue" })}
             onScan={handleScan}
-            onNoCamera={() => say("warn", "Kameran gick inte att starta", "Tillåt kameran i webbläsaren, eller använd handskanner.", true)}
+            onNoCamera={noCamera}
             onDeviation={() => setDevOpen(true)}
             onFinish={() => go({ name: "done", id: order.id })}
             onRelease={() => once(async () => { await store.release(order.id, me); say("ok", `#${order.id} släppt`, "Ordern ligger i kön igen."); go({ name: "queue" }) })} />
@@ -194,14 +188,6 @@ function UspStrip() {
   )
 }
 
-function Header({ children }: { children: ReactNode }) {
-  return (
-    <header className="sticky top-[env(safe-area-inset-top,0px)] z-30 border-b bg-header">
-      <div className="mx-auto flex max-w-xl items-center gap-3 px-4 py-3">{children}</div>
-    </header>
-  )
-}
-
 function FlashBanner({ flash, onClose }: { flash: Flash | null; onClose: () => void }) {
   return (
     <div role="alert" aria-live="assertive"
@@ -233,10 +219,37 @@ function ShipBadge({ o }: { o: Order }) {
     : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />PostNord</Badge>
 }
 
+function TopBar({ user, onLogout, tab, onTab }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void }) {
+  const tabs: [Tab, string][] = [["queue", "Plock"], ["inleverans", "Inleverans"], ["saldo", "Saldo"]]
+  return (
+    <>
+      <UspStrip />
+      <header className="sticky top-[env(safe-area-inset-top,0px)] z-30 border-b bg-header">
+        <div className="mx-auto flex max-w-xl items-center gap-3 px-4 pt-3">
+          <Logo />
+          <div className="flex-1" />
+          <div className="text-right leading-tight">
+            <div className="font-semibold">{user.name}</div>
+            <button className="text-xs text-muted-foreground underline" onClick={onLogout}>Logga ut</button>
+          </div>
+        </div>
+        <nav className="mx-auto mt-2 flex max-w-xl px-2" aria-label="Meny">
+          {tabs.map(([t, label]) => (
+            <button key={t} onClick={() => onTab(t)} aria-current={tab === t ? "page" : undefined}
+              className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
+    </>
+  )
+}
+
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, user, onLogout, onStart, onOpen, onReset }: {
-  orders: Order[]; user: User; onLogout: () => void; onStart: (id: string) => void; onOpen: (id: string) => void; onReset: () => void
+function Queue({ orders, user, onStart, onOpen, onReset }: {
+  orders: Order[]; user: User; onStart: (id: string) => void; onOpen: (id: string) => void; onReset: () => void
 }) {
   const me = user.name
   const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
@@ -250,16 +263,6 @@ function Queue({ orders, user, onLogout, onStart, onOpen, onReset }: {
   ]
   return (
     <>
-      <UspStrip />
-      <Header>
-        <Logo />
-        <span className="ml-1 rounded bg-primary px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary-foreground">Plock</span>
-        <div className="flex-1" />
-        <div className="text-right leading-tight">
-          <div className="font-semibold">{me}</div>
-          <button className="text-xs text-muted-foreground underline" onClick={onLogout}>Logga ut</button>
-        </div>
-      </Header>
       <main className="mx-auto max-w-xl px-4 pb-24">
         <div className="mt-5 flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Hej {me}!</h1>
@@ -331,12 +334,7 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
 }) {
   const { lines, i, line } = currentLine(o, products, sel)
   const done = lines.filter(lineDone).length
-  const [code, setCode] = useState("")
-  const [typing, setTyping] = useState(false)
-  const [camera, setCamera] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const curRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (!camera) inputRef.current?.focus({ preventScroll: true }) }, [i, line?.locOk, line?.picked, camera])
   useEffect(() => {
     const c = curRef.current; if (!c || !shakeN) return
     c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake")
@@ -389,6 +387,7 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
                   <div className="text-lg font-bold leading-tight text-card-foreground">{p.name}</div>
                   <div className="mt-1"><span className="rounded bg-accent px-1.5 py-0.5 text-[16px] font-bold text-accent-foreground">{p.variant}</span></div>
                   <div className="mt-1.5 break-all font-mono text-xs text-muted-foreground">{line.sku} · EAN {p.ean}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">Saldo på hyllan: {p.stock} st</div>
                 </div>
               </div>
               <div className="grid grid-cols-2 border-t text-sm">
@@ -404,18 +403,8 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
               </div>
             </div>
 
-            <form className="mt-3 flex gap-2" autoComplete="off" onSubmit={e => { e.preventDefault(); onScan(code); setCode("") }}>
-              <div className="relative min-w-0 flex-1">
-                <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                <input ref={inputRef} id="scan" value={code} onChange={e => setCode(e.target.value)} inputMode={typing ? "text" : "none"}
-                  placeholder={step === 1 ? "Skanna hylletikett" : "Skanna varans streckkod"} aria-label="Skannad kod"
-                  className="h-12 w-full rounded-md border-2 border-dashed border-input bg-card pl-10 pr-3 font-mono text-base text-card-foreground outline-none focus:border-solid focus:border-ring" />
-              </div>
-              {!!navigator.mediaDevices?.getUserMedia && (
-                <Button type="button" className="h-12 px-4" onClick={() => setCamera(true)} aria-label="Skanna med kameran"><Camera className="!h-5 !w-5" /></Button>
-              )}
-              <Button type="button" variant="outline" className="h-12" aria-label="Skriv in kod" onClick={() => { setTyping(true); setTimeout(() => inputRef.current?.focus(), 0) }}><Keyboard className="!h-5 !w-5" /></Button>
-            </form>
+            <ScanBar placeholder={step === 1 ? "Skanna hylletikett" : "Skanna varans streckkod"} onScan={onScan} onNoCamera={onNoCamera}
+              hint={step === 1 ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} focusKey={`${i}-${line.locOk}-${line.picked}`} />
 
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               <span className="text-[13px] text-muted-foreground">Testa:</span>
@@ -469,16 +458,7 @@ function Pick({ o, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
         </div>
         {line && <div className="mt-6 text-center"><button className="text-sm text-muted-foreground underline" onClick={onRelease}>Släpp ordern tillbaka till kön</button></div>}
       </main>
-      {camera && <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}><CameraScanner onClose={() => setCamera(false)} onFail={() => { setCamera(false); onNoCamera() }}
-        onCode={c => { setCamera(false); onScan(c) }} hint={step === 1 ? "Rikta mot hylletiketten" : "Rikta mot varans streckkod"} /></Suspense>}
     </>
-  )
-}
-
-function Chip({ children, bad, onClick }: { children: ReactNode; bad?: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 text-sm font-semibold",
-      bad ? "border-destructive text-destructive" : "text-card-foreground")}>{children}</button>
   )
 }
 

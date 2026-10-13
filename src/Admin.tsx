@@ -9,6 +9,7 @@ import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import ImportPanel from "./ImportPanel"
+import { stockRows } from "./Lager"
 import { Button } from "@/components/ui/button"
 
 const store = createStore()
@@ -19,6 +20,7 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   pack: { label: "Klar för pack", cls: "bg-ok-soft text-ok" },
   avv: { label: "Avvikelse", cls: "bg-bad-soft text-destructive" },
 }
+const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse" }
 const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3 }
 
 const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
@@ -85,6 +87,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const late = orders.filter(o => isLate(o, now))
   const active = orders.filter(o => o.status === "plock")
   const deviations = orders.flatMap(o => o.lines.filter(l => l.dev).map(l => ({ o, l, p: products[l.sku] })))
+  const stock = stockRows(products, orders)
   const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
 
   const pickers = [...new Set([...USERS.filter(u => u.role === "plock").map(u => u.name), ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
@@ -237,6 +240,47 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
             {!deviations.length && <p className="text-sm text-muted-foreground">Inga avvikelser.</p>}
           </div>
         </Section>
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{stock.filter(r => r.short).length} räcker inte · {stock.filter(r => r.low).length} låga</span>}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-4 py-2 text-right">Min</th></tr>
+                </thead>
+                <tbody>
+                  {stock.map(r => (
+                    <tr key={r.p.sku} className="border-b last:border-0">
+                      <td className="px-4 py-2 font-bold tabular-nums">{r.p.loc}</td>
+                      <td className="px-2 py-2">{r.p.name}<span className="text-muted-foreground">, {r.p.variant}</span>
+                        {r.short && <Badge className="ml-2 rounded bg-bad-soft text-destructive shadow-none hover:bg-bad-soft">Räcker inte</Badge>}
+                        {r.low && <Badge className="ml-2 rounded bg-warn-soft text-warn shadow-none hover:bg-warn-soft">Lågt</Badge>}</td>
+                      <td className="px-2 py-2 text-right font-bold tabular-nums">{r.p.stock}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{r.reserved}</td>
+                      <td className={cn("px-2 py-2 text-right tabular-nums", r.short && "font-bold text-destructive")}>{r.free}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{r.p.minStock}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+          <Section title="Senaste lagerrörelser">
+            <div className="divide-y">
+              {snap.moves.slice(0, 12).map(m => {
+                const p = products[m.sku]
+                return (
+                  <div key={m.id} className="flex items-baseline gap-3 px-4 py-2 text-sm">
+                    <span className={cn("w-12 shrink-0 text-right font-bold tabular-nums", m.qty > 0 ? "text-ok" : "text-destructive")}>{m.qty > 0 ? `+${m.qty}` : m.qty}</span>
+                    <span className="min-w-0 flex-1 truncate">{p?.loc} {p?.name}, {p?.variant}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{MOVE[m.kind]}{m.note ? ` (${m.note})` : ""} · {m.who} {clock(m.at)}</span>
+                  </div>
+                )
+              })}
+              {!snap.moves.length && <p className="px-4 py-4 text-sm text-muted-foreground">Inga rörelser sedan återställning.</p>}
+            </div>
+          </Section>
+        </div>
 
         <Section title="Importera order från CSV">
           <ImportPanel products={products} existing={new Set(orders.map(o => o.id))} onImport={list => store.importOrders(list)} />

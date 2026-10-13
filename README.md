@@ -38,3 +38,7 @@ ordernr;kund;frakt;klart_senast;artikelnr;antal
 ```
 
 `frakt` som börjar med "Express" blir expressorder, allt annat PostNord. Order som redan finns hoppas över. `public/demo-order.csv` är en påhittad exempelfil. När DPJ:s ordersystem kan exportera filen behöver bara kolumnnamnen matchas.
+
+## Inleverans och saldo
+
+Varje artikel har en hyllplats och ett saldo. Under fliken Inleverans skannar man varan (en gång per styck, eller ändra antalet), och sedan hyllan för att ställa in den. Plock drar en från saldot per skannad vara. En avvikelse av typen "Saknas" eller "Fel saldo" nollar saldot, eftersom hyllan då är tom. Fliken Saldo visar saldo, hur mycket som ligger i kön och om det räcker. Översikten visar samma sak och de senaste lagerrörelserna.
