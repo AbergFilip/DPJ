@@ -1,0 +1,63 @@
+// Typer, hjälpfunktioner och demodata för lokalt läge. Allt är påhittat, inget kommer från DPJ:s system.
+
+export type ProductType = "skiva" | "stativ" | "hurts" | "stol" | "vagg" | "arm" | "ranna" | "fot"
+export interface Product { sku: string; name: string; variant: string; ean: string; loc: string; type: ProductType; brand?: string | null }
+export interface Deviation { kind: DeviationKind; found: number; note: string; photo: string | null }
+export type DeviationKind = "Saknas" | "Skadad" | "Fel saldo"
+export interface Line { id: string; sku: string; qty: number; picked: number; locOk: boolean; dev: Deviation | null }
+export type Status = "ny" | "plock" | "pack" | "avv"
+export interface Order {
+  id: string; cust: string; ship: "exp" | "std"; shipTxt: string; due: string; status: Status
+  lines: Line[]; picker?: string | null; startedAt?: number | null; doneAt?: number | null
+}
+export type Products = Record<string, Product>
+export interface Snapshot { products: Products; orders: Order[] }
+
+export const PICKERS = ["Sara", "Amir", "Jonna", "Mikael"]
+export const DEVIATION_KINDS: DeviationKind[] = ["Saknas", "Skadad", "Fel saldo"]
+
+const P = (sku: string, name: string, variant: string, ean: string, loc: string, type: ProductType, brand?: string): Product =>
+  ({ sku, name, variant, ean, loc, type, brand })
+
+export const SEED_PRODUCTS: Products = Object.fromEntries([
+  P("BRZ-SK-1680-VI", "Bordsskiva Professional", "160×80 cm, vit", "7340001216801", "A-03-2", "skiva", "Brizley"),
+  P("BRZ-SK-1680-EK", "Bordsskiva Professional", "160×80 cm, ek", "7340001216818", "A-03-3", "skiva", "Brizley"),
+  P("BRZ-SK-1890-AN", "Bordsskiva Professional", "180×90 cm, antracit", "7340001218904", "A-05-1", "skiva", "Brizley"),
+  P("BRZ-ST-EL2-SV", "Elstativ Professional, 2 motorer", "svart, för 160–180 cm", "7340001302214", "B-02-1", "stativ", "Brizley"),
+  P("BRZ-ST-EL2-VI", "Elstativ Professional, 2 motorer", "vit, för 160–180 cm", "7340001302221", "B-02-2", "stativ", "Brizley"),
+  P("HU-3L-VI", "Hurts 3 lådor, låsbar", "vit", "7340001455101", "C-06-2", "hurts"),
+  P("KS-ERGO-SV", "Kontorsstol Ergo Plus", "svart tyg", "7340001501209", "C-11-1", "stol"),
+  P("SV-160-GR", "Skärmvägg bordsmonterad", "160 cm, grå filt", "7340001604306", "D-04-3", "vagg"),
+  P("MA-DUO-SV", "Skärmarm dubbel", "svart", "7340001700107", "E-01-4", "arm"),
+  P("KR-140-SV", "Kabelränna", "140 cm, svart", "7340001714005", "E-02-1", "ranna"),
+  P("FS-ERGO", "Fotstöd, justerbart", "svart", "7340001720600", "E-03-2", "fot"),
+].map(p => [p.sku, p]))
+
+export const seedOrders = (): Order[] => {
+  const L = (order: string, sku: string, qty: number, extra: Partial<Line> = {}): Line =>
+    ({ id: `${order}-${sku}`, sku, qty, picked: 0, locOk: false, dev: null, ...extra })
+  const ago = (m: number) => Date.now() - m * 60000
+  return [
+    { id: "100481", cust: "Nordvik Redovisning AB", ship: "exp", shipTxt: "Express Stockholm", due: "11:30", status: "ny",
+      lines: [L("100481", "BRZ-SK-1680-VI", 2), L("100481", "BRZ-ST-EL2-SV", 2), L("100481", "KR-140-SV", 2)] },
+    { id: "100484", cust: "Studio Hägg & Co", ship: "exp", shipTxt: "Express Stockholm", due: "11:45", status: "ny",
+      lines: [L("100484", "BRZ-SK-1890-AN", 1), L("100484", "BRZ-ST-EL2-SV", 1), L("100484", "HU-3L-VI", 1), L("100484", "SV-160-GR", 1)] },
+    { id: "100482", cust: "Lindqvist Arkitekter", ship: "std", shipTxt: "PostNord", due: "15:00", status: "ny",
+      lines: [L("100482", "BRZ-SK-1680-EK", 1), L("100482", "BRZ-ST-EL2-VI", 1), L("100482", "MA-DUO-SV", 1)] },
+    { id: "100483", cust: "Fjällgren Fastigheter", ship: "std", shipTxt: "PostNord", due: "15:00", status: "plock", picker: "Amir", startedAt: ago(6),
+      lines: [L("100483", "KS-ERGO-SV", 4, { picked: 2, locOk: true }), L("100483", "FS-ERGO", 4)] },
+    { id: "100485", cust: "Berglund Tandvård", ship: "std", shipTxt: "PostNord", due: "15:00", status: "ny",
+      lines: [L("100485", "HU-3L-VI", 2), L("100485", "SV-160-GR", 2)] },
+    { id: "100480", cust: "Öberg Konsult", ship: "std", shipTxt: "PostNord", due: "15:00", status: "avv", picker: "Jonna", startedAt: ago(52), doneAt: ago(41),
+      lines: [L("100480", "BRZ-SK-1680-EK", 1, { picked: 1, locOk: true }),
+        L("100480", "BRZ-ST-EL2-SV", 1, { locOk: true, dev: { kind: "Saknas", found: 0, note: "Tom plats B-02-1", photo: null } })] },
+    { id: "100479", cust: "Kvarnström Media", ship: "exp", shipTxt: "Express Stockholm", due: "10:00", status: "pack", picker: "Amir", startedAt: ago(75), doneAt: ago(66),
+      lines: [L("100479", "KS-ERGO-SV", 2, { picked: 2, locOk: true }), L("100479", "MA-DUO-SV", 2, { picked: 2, locOk: true })] },
+  ]
+}
+
+export const lineDone = (l: Line) => l.picked >= l.qty || !!l.dev
+export const kolli = (o: Order) => o.lines.reduce((n, l) => n + l.qty, 0)
+export const mins = (ms: number) => Math.max(1, Math.round(ms / 60000))
+export const sortByLoc = (lines: Line[], products: Products) =>
+  [...lines].sort((a, b) => (products[a.sku]?.loc ?? "").localeCompare(products[b.sku]?.loc ?? "", "sv", { numeric: true }))
