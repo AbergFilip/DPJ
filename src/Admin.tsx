@@ -4,12 +4,13 @@ import { AlertTriangle, Camera, Clock, PackageCheck, Timer, TrendingDown, Truck,
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status } from "./data"
+import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status, type StockMove } from "./data"
 import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
 import Login, { Logo } from "./Login"
 import ImportPanel from "./ImportPanel"
 import { refillRows, stockRows } from "./Lager"
+import { DAY_END, DAY_START, errorsPerWeek, picksPerHour } from "./stats"
 import { Button } from "@/components/ui/button"
 
 const store = createStore()
@@ -48,6 +49,70 @@ const Section = ({ title, children, right }: { title: string; children: ReactNod
     {children}
   </section>
 )
+
+/* ---------- Statistik över tid ---------- */
+
+// Staplar per timme. Timmar som fyllts med demohistorik ritas ljusare och märks ut under grafen.
+function HourChart({ moves, now }: { moves: StockMove[]; now: number }) {
+  const bars = picksPerHour(moves, now)
+  const max = Math.max(10, ...bars.map(b => b.picks))
+  const total = bars.reduce((n, b) => n + b.picks, 0)
+  const best = bars.reduce((a, b) => (b.picks > a.picks ? b : a), bars[0])
+  const hourNow = new Date(now).getHours()
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-baseline gap-x-4 text-sm text-muted-foreground">
+        <span><b className="text-2xl font-extrabold tabular-nums text-foreground">{total}</b> kolli i dag</span>
+        <span>snitt {Math.round(total / bars.length)} per timme</span>
+        {best.picks > 0 && <span>bäst kl {best.hour}: {best.picks}</span>}
+      </div>
+      <div className="mt-4 flex h-40 items-stretch gap-1.5">
+        {bars.map(b => (
+          <div key={b.hour} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+            <span className="text-[11px] font-bold tabular-nums text-muted-foreground">{b.picks || ""}</span>
+            <div className={cn("w-full rounded-t", b.hour === hourNow ? "bg-primary" : b.demo ? "bg-secondary" : "bg-ok")}
+              style={{ height: `${Math.max(2, (b.picks / max) * 85)}%` }}
+              title={`Kl ${b.hour}: ${b.picks} kolli${b.demo ? " (demohistorik)" : ""}`} />
+            <span className="text-[11px] tabular-nums text-muted-foreground">{b.hour}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Kl {DAY_START}–{DAY_END}. Grönt är plock som gjorts i demon, grått är påhittad historik för timmar som redan passerat.
+      </p>
+    </div>
+  )
+}
+
+// Felrate per vecka: andel order med avvikelse.
+function WeekChart({ orders, now }: { orders: Order[]; now: number }) {
+  const weeks = errorsPerWeek(orders, now)
+  const max = Math.max(2, ...weeks.map(w => w.rate))
+  const last = weeks[weeks.length - 1]
+  const prev = weeks[weeks.length - 2]
+  const trend = prev ? Math.round((last.rate - prev.rate) * 10) / 10 : 0
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-baseline gap-x-4 text-sm text-muted-foreground">
+        <span><b className={cn("text-2xl font-extrabold tabular-nums", last.rate > 5 ? "text-destructive" : "text-foreground")}>{last.rate} %</b> den här veckan</span>
+        <span>{last.devs} av {last.orders} order</span>
+        {prev && <span className={cn("font-semibold", trend > 0 ? "text-destructive" : "text-ok")}>{trend > 0 ? "+" : ""}{trend} mot förra veckan</span>}
+      </div>
+      <div className="mt-4 flex h-40 items-stretch gap-2">
+        {weeks.map(w => (
+          <div key={w.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+            <span className="text-[11px] font-bold tabular-nums text-muted-foreground">{w.rate}</span>
+            <div className={cn("w-full rounded-t", w.demo ? "bg-secondary" : w.rate > 5 ? "bg-destructive" : "bg-ok")}
+              style={{ height: `${Math.max(2, (w.rate / max) * 85)}%` }}
+              title={`${w.label}: ${w.devs} av ${w.orders} order med avvikelse${w.demo ? " (demohistorik)" : ""}`} />
+            <span className="truncate text-[11px] tabular-nums text-muted-foreground">{w.label}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">Andel plockade order med avvikelse. Sista stapeln är demons egna order, de grå är påhittad historik.</p>
+    </div>
+  )
+}
 
 export default function Admin() {
   const [user, setUser] = useState<User | null>(currentUser)
@@ -219,6 +284,11 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
               </table></div>
             </Section>
           </div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="Plock per timme i dag"><HourChart moves={snap.moves} now={now} /></Section>
+          <Section title="Felrate per vecka"><WeekChart orders={orders} now={now} /></Section>
         </div>
 
         <Section title="Avvikelser att åtgärda" right={<span className="text-sm text-muted-foreground">{deviations.length} st</span>}>

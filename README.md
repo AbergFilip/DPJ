@@ -55,6 +55,10 @@ Fliken Pack är sista steget. Packaren skannar ordernumret på plocklådan (stre
 
 Fliken Saldo börjar med "Att fylla på": artiklar där saldot inte räcker till orderna i kön plus ett min-saldo kvar på hyllan. Siffran visas också som en bricka på fliken, så plockaren ser det utan att leta. "Fyll på" tar personen vidare till inleveransen med artikeln förvald. "Räkna" öppnar inventeringen: skanna hyllan (eller en vara som står där), slå in antalet på knappsatsen och se direkt skillnaden mot saldot. Sparandet rättar saldot och loggar skillnaden som en lagerrörelse av typen Inventering, med kommentar. Översikten visar hur mycket som behöver fyllas på och när varje hyllplats senast räknades. Databasfunktionen är `count_stock`.
 
+## Statistik över tid
+
+Översikten har två grafer: plock per timme i dag och felrate per vecka (andel plockade order med avvikelse) åtta veckor bakåt. Demon har ingen äldre data, så timmar och veckor som redan passerat fylls med en påhittad historik i `src/stats.ts`. Den är grå i graferna och förklaras under dem, och den ser likadan ut varje gång eftersom slumpen har dagens datum som frö. Det som gjorts i demon räknas från riktiga lagerrörelser och order och ritas i färg.
+
 ## Utan nät
 
 Appens filer cachas i mobilen (PWA), och senaste kända orderläget sparas lokalt. Tappar mobilen täckningen fortsätter plocket mot den lokala kopian: varje skanning sparas i en kö i mobilen och en gul rad visar hur många ändringar som väntar. När nätet är tillbaka skickas de i ordning. Om någon annan hann ta samma order under tiden sparas inte den ändringen, och plockaren får ett meddelande. Reglerna för plock finns i `src/ops.ts` och används både i demoläget och utan nät.
