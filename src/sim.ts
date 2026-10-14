@@ -5,10 +5,11 @@ import { expectedWeight, lineDone, sortByLoc, type Order, type Snapshot } from "
 import type { NewOrder } from "./csv"
 import type { Store } from "./store"
 import { refillRows, stockRows } from "./Lager"
+import { allocate, countTips, queueOrder } from "./prio"
 
-export type SimKind = "order" | "claim" | "pick" | "dev" | "done" | "pack" | "in"
+export type SimKind = "order" | "claim" | "pick" | "dev" | "done" | "pack" | "in" | "count"
 export interface SimEvent { id: number; at: number; kind: SimKind; who: string | null; text: string }
-export interface SimStats { orders: number; picks: number; packed: number; devs: number; received: number }
+export interface SimStats { orders: number; picks: number; packed: number; devs: number; received: number; counted: number }
 export type Speed = 1 | 3 | 8
 
 export const SIM_PICKERS = ["Amir", "Jonna"]
@@ -30,7 +31,7 @@ export class Simulation {
   running = false
   speed: Speed = 3
   events: SimEvent[] = []
-  stats: SimStats = { orders: 0, picks: 0, packed: 0, devs: 0, received: 0 }
+  stats: SimStats = { orders: 0, picks: 0, packed: 0, devs: 0, received: 0, counted: 0 }
   private timer: ReturnType<typeof setTimeout> | null = null
   private busy = false
   private tick = 0
@@ -102,6 +103,11 @@ export class Simulation {
     const n = 1 + Math.floor(this.rand() * 3)
     const lines = new Map<string, number>()
     while (lines.size < n) lines.set(pickOne(skus, this.rand), this.rand() < 0.75 ? 1 : 2)
+    // Ibland en storkund som vill ha fler än det finns på hyllan, så omprioriteringen syns.
+    if (this.rand() < 0.15) {
+      const sku = pickOne(skus, this.rand)
+      lines.set(sku, Math.max(3, s.products[sku].stock + 1 + Math.floor(this.rand() * 3)))
+    }
     const exp = this.rand() < 0.3
     const now = Date.now()
     // Simulerade order får nummer från 300100 och uppåt, så de inte krockar med demons egna.
@@ -120,9 +126,9 @@ export class Simulation {
   private async pickStep(p: Picker, s: Snapshot) {
     const mine = s.orders.filter(o => o.status === "plock" && o.picker === p.name)
     if (!mine.length) {
-      // Ta en eller två order, expressorder först.
-      const free = s.orders.filter(o => o.status === "ny")
-        .sort((a, b) => (a.ship === "exp" ? 0 : 1) - (b.ship === "exp" ? 0 : 1) || a.due.localeCompare(b.due))
+      // Ta en eller två order i prioritetsordning. Restorder får vänta tills hyllan fyllts på.
+      const alloc = allocate(s.orders, s.products)
+      const free = queueOrder(s.orders.filter(o => o.status === "ny" && alloc.get(o.id)?.ok), alloc)
       // Med få order i kön tar de det lugnt, så det finns något kvar att plocka för den som provar appen.
       if (!free.length || (free.length < 3 && this.rand() < 0.6)) return
       const ids = free.slice(0, free.length > 2 && this.rand() < 0.5 ? 2 : 1).map(o => o.id)
@@ -179,9 +185,24 @@ export class Simulation {
       }
       return
     }
-    // Inget att packa: fyll på den hylla som behöver det mest.
+    // Inget att packa: räkna en hylla med avvikelse, annars fyll på den som behöver det mest.
+    // Restorder väntar på varor: då går påfyllnaden före allt annat.
+    const urgent = [...allocate(s.orders, s.products).values()].some(x => !x.ok)
+    const tip = countTips(s.products, s.orders, s.moves).find(x => x.reason === "dev" || x.reason === "empty" || x.reason === "short")
+    if (tip && this.rand() < (urgent ? 0.15 : 0.4)) {
+      const p = s.products[tip.sku]
+      // Ibland står det några kvar längst in på hyllan, ibland stämmer saldot.
+      const counted = Math.max(0, p.stock) + (this.rand() < 0.5 ? Math.floor(this.rand() * 4) : 0)
+      if (await this.store.count(p.sku, counted, SIM_PACKER, counted !== p.stock ? "Hittade fler längst in" : "") != null) {
+        this.stats.counted++
+        this.packWait = 2
+        const d = counted - p.stock
+        this.log("count", SIM_PACKER, `${SIM_PACKER} inventerade ${p.loc}: ${counted} st${d ? ` (${d > 0 ? "+" : ""}${d} mot saldot)` : ", stämde"}`)
+      }
+      return
+    }
     const r = refillRows(stockRows(s.products, s.orders))[0]
-    if (r && this.rand() < 0.5) {
+    if (r && (urgent || this.rand() < 0.5)) {
       const qty = r.need + r.p.minStock
       if (await this.store.receive(r.p.sku, qty, SIM_PACKER) != null) {
         this.stats.received += qty
