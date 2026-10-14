@@ -41,7 +41,8 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 // sv, en, pl, ar
 const DICT: Record<string, [string, string, string, string]> = {
   "common.cancel": ["Avbryt", "Cancel", "Anuluj", "إلغاء"],
-  "common.test": ["Testa:", "Try:", "Testuj:", "جرّب:"],
+  "common.loading": ["Hämtar order…", "Loading orders…", "Ładowanie zamówień…", "جارٍ تحميل الطلبات…"],
+  "common.test": ["Demo: simulera skanning", "Demo: simulate a scan", "Demo: symuluj skan", "تجربة: محاكاة المسح"],
   "common.ok": ["OK", "OK", "OK", "حسناً"],
   "common.min": ["{n} min", "{n} min", "{n} min", "{n} د"],
   "common.st": ["st", "pcs", "szt.", "قطعة"],

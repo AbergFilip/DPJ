@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { expectedWeight, kolli, sortByLoc, type Order, type Products } from "./data"
 import { Logo } from "./Login"
-import { Chip, Pict, ScanBar } from "./parts"
+import { Chip, Pict, ScanBar, DemoLabel } from "./parts"
 import { lang, t } from "./i18n"
 
 type Say = (kind: "ok" | "err" | "warn", title: string, sub?: string, sticky?: boolean) => void
@@ -44,7 +44,7 @@ export function Pack({ orders, products, me, say, onNoCamera, onPack, onPrint }:
     }} />
 
   return (
-    <main className="mx-auto max-w-xl px-4 pb-24">
+    <main className="mx-auto max-w-xl px-4 pb-36">
       <h1 className="mt-5 text-2xl font-bold tracking-tight">{t("p.title")}</h1>
       <p className="text-muted-foreground">{ready.length ? t("p.waiting", { n: ready.length }) : t("p.noneWaiting")}</p>
 
@@ -58,8 +58,8 @@ export function Pack({ orders, products, me, say, onNoCamera, onPack, onPrint }:
 
       <ScanBar placeholder={t("p.scan")} hint={t("p.hint")} onScan={onScan} onNoCamera={onNoCamera} focusKey={doneId} />
       {ready.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+        <div className="demo-box mt-3 flex flex-wrap items-center gap-2">
+          <DemoLabel />
           <Chip onClick={() => onScan(ready[0].id)}>{t("p.order")} <code className="font-mono text-xs text-muted-foreground">{ready[0].id}</code></Chip>
           {sent[0] && <Chip bad onClick={() => onScan(sent[0].id)}>{t("p.alreadyChecked")} <code className="font-mono text-xs">{sent[0].id}</code></Chip>}
         </div>
@@ -136,7 +136,7 @@ function PackOrder({ o, products, say, onNoCamera, onBack, onPack }: {
   const next = lines.find(l => (checked[l.id] ?? 0) < l.picked)
 
   return (
-    <main className="mx-auto max-w-xl px-4 pb-24">
+    <main className="mx-auto max-w-xl px-4 pb-36">
       <button className="mt-3 -ml-1 flex items-center gap-1 text-base font-semibold" onClick={onBack}><ChevronLeft className="h-5 w-5" />{t("p.title")}</button>
       <div className="mt-2 flex items-baseline gap-2">
         <h1 className="text-2xl font-bold tracking-tight">#{o.id}</h1>
@@ -150,8 +150,8 @@ function PackOrder({ o, products, say, onNoCamera, onBack, onPack }: {
       {!allChecked && (
         <>
           <ScanBar placeholder={t("p.scanItems")} hint={t("hint.item")} onScan={onScan} onNoCamera={onNoCamera} focusKey={ok} />
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+          <div className="demo-box mt-3 flex flex-wrap items-center gap-2">
+            <DemoLabel />
             {next && <Chip onClick={() => onScan(products[next.sku].ean)}>{t("p.next")}</Chip>}
             {(() => { const x = Object.values(products).find(q => !lines.some(l => l.sku === q.sku)); return x && <Chip bad onClick={() => onScan(x.ean)}>{t("chip.wrongItem")}</Chip> })()}
             <Chip onClick={() => setChecked(Object.fromEntries(lines.map(l => [l.id, l.picked])))}>{t("p.allRight")}</Chip>

@@ -1,6 +1,6 @@
 // Delar som används av flera vyer i plockappen.
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react"
-import { Camera, Keyboard, ScanLine } from "lucide-react"
+import { Camera, FlaskConical, Keyboard, ScanLine } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ProductType } from "./data"
@@ -32,9 +32,14 @@ export function Header({ children }: { children: ReactNode }) {
   )
 }
 
+// Rubrik för demoknapparna som låtsas skanna, så de inte förväxlas med riktiga knappar.
+export function DemoLabel() {
+  return <span className="flex w-full items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground"><FlaskConical className="h-3.5 w-3.5" />{t("common.test")}</span>
+}
+
 export function Chip({ children, bad, onClick }: { children: ReactNode; bad?: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 text-sm font-semibold",
+    <button onClick={onClick} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 text-sm font-semibold shadow-sm transition active:scale-95",
       bad ? "border-destructive text-destructive" : "text-card-foreground")}>{children}</button>
   )
 }

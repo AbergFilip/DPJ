@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Camera, Check, ChevronLeft, Clock, Lock, Minus, PackageCheck, Plus, ScanLine, Truck, Zap } from "lucide-react"
+import { AlertTriangle, Barcode, Boxes, Camera, Check, ChevronLeft, Clock, LayoutDashboard, ListChecks, Lock, LogOut, Minus, PackageCheck, PackagePlus, Plus, RotateCcw, ScanLine, Truck, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -14,8 +14,8 @@ import {
 import { createStore, type SyncStatus } from "./store"
 import { currentUser, logout, type User } from "./auth"
 import { LANGS, lang, setLang, t } from "./i18n"
-import Login, { Logo } from "./Login"
-import { Chip, Header, Pict, ScanBar } from "./parts"
+import Login, { Avatar, Logo } from "./Login"
+import { Chip, Header, Pict, ScanBar, DemoLabel } from "./parts"
 import { Inleverans, Inventering, Saldo, refillRows, stockRows } from "./Lager"
 import { Pack, PackingSlip } from "./Pack"
 
@@ -98,7 +98,7 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
     try { await fn() } catch { /* felet visas via onError */ } finally { busy.current = false }
   }
 
-  if (!snap) return <div className="grid min-h-screen place-items-center text-muted-foreground">Hämtar order…</div>
+  if (!snap) return <Skeleton />
   const { products, orders } = snap
   const round = roundOf(orders, me)
   const tab = view.name === "pick" || view.name === "done" ? null : view.name
@@ -142,7 +142,8 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
     <div className="min-h-full print:hidden">
       <FlashBanner flash={flash} onClose={() => setFlash(null)} />
       <SyncBar sync={sync} />
-      {tab && <TopBar user={user} onLogout={onLogout} tab={tab} onTab={t => { setFocusSku(null); go({ name: t }) }} refill={refillRows(stockRows(products, orders)).length} />}
+      {tab && <TopBar user={user} sync={sync} onLogout={onLogout} tab={tab} onTab={t => { setFocusSku(null); go({ name: t }) }} refill={refillRows(stockRows(products, orders)).length}
+        onReset={() => once(async () => { await store.reset(); say("ok", t("f.resetOk")) })} />}
       {view.name === "inleverans" && (
         <Inleverans products={products} moves={snap.moves} say={say} onNoCamera={noCamera} preset={focusSku}
           onReceive={(sku, qty) => store.receive(sku, qty, me)} />
@@ -159,13 +160,12 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
       {view.name === "saldo" && <Saldo products={products} orders={orders}
         onRefill={sku => goSku("inleverans", sku)} onCount={sku => goSku("inventering", sku)} />}
       {view.name === "queue" && (
-        <Queue orders={orders} user={user} sync={sync}
+        <Queue orders={orders} user={user}
           onStart={ids => once(async () => {
             if (await store.claimMany(ids, me)) go({ name: "pick" })
             else say("warn", ids.length > 1 ? t("f.takenMany") : t("f.taken"), t("f.takenSub"))
           })}
-          onOpen={() => go({ name: "pick" })}
-          onReset={() => once(async () => { await store.reset(); say("ok", t("f.resetOk")) })} />
+          onOpen={() => go({ name: "pick" })} />
       )}
       {(view.name === "pick" || view.name === "done") && !round.orders.length && <p className="p-6 text-muted-foreground">{t("queue.none")} <button className="underline" onClick={() => go({ name: "queue" })}>{t("queue.toQueue")}</button></p>}
       {view.name === "pick" && round.orders.length > 0 && (
@@ -220,21 +220,6 @@ function SyncBar({ sync }: { sync: SyncStatus }) {
   )
 }
 
-function UspStrip() {
-  const items = [t("usp.1"), t("usp.2"), t("usp.3")]
-  return (
-    <div className="bg-strip text-[13px] font-medium text-strip-foreground">
-      <div className="mx-auto flex max-w-xl items-center justify-between gap-3 overflow-hidden px-4 py-1.5">
-        {items.map((t, k) => (
-          <span key={t} className={cn("flex items-center gap-1.5 whitespace-nowrap", k === 2 && "hidden sm:flex")}>
-            <Check className="h-3.5 w-3.5" strokeWidth={3} />{t}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function FlashBanner({ flash, onClose }: { flash: Flash | null; onClose: () => void }) {
   return (
     <div role="alert" aria-live="assertive"
@@ -266,42 +251,112 @@ function ShipBadge({ o }: { o: Order }) {
     : <Badge variant="outline" className="gap-1 rounded"><Truck className="h-3 w-3" />{o.shipTxt.split(" ")[0]}</Badge>
 }
 
-function TopBar({ user, onLogout, tab, onTab, refill }: { user: User; onLogout: () => void; tab: Tab; onTab: (t: Tab) => void; refill: number }) {
-  const tabs: [Tab, string][] = [["queue", t("tab.queue")], ["pack", t("tab.pack")], ["inleverans", t("tab.in")], ["saldo", t("tab.saldo")]]
+const TABS: { k: Tab; icon: typeof ListChecks }[] = [
+  { k: "queue", icon: ListChecks }, { k: "pack", icon: PackageCheck }, { k: "inleverans", icon: PackagePlus }, { k: "saldo", icon: Boxes },
+]
+const TAB_LABEL: Record<string, string> = { queue: "tab.queue", pack: "tab.pack", inleverans: "tab.in", saldo: "tab.saldo" }
+
+// Appens topp: logga, var man är och kontot. Menyn ligger i botten som i en vanlig mobilapp.
+function TopBar({ user, sync, onLogout, onReset, tab, onTab, refill }: {
+  user: User; sync: SyncStatus; onLogout: () => void; onReset: () => void; tab: Tab; onTab: (t: Tab) => void; refill: number
+}) {
+  const [open, setOpen] = useState(false)
+  const live = store.mode === "local" ? "local" : sync.online ? "on" : "off"
   return (
     <>
-      <UspStrip />
-      <header className="sticky top-[env(safe-area-inset-top,0px)] z-30 border-b bg-header">
-        <div className="mx-auto flex max-w-xl items-center gap-3 px-4 pt-3">
+      <header className="sticky top-0 z-30 border-b bg-header/95 pt-[env(safe-area-inset-top,0px)] backdrop-blur supports-[backdrop-filter]:bg-header/80">
+        <div className="mx-auto flex h-14 max-w-xl items-center gap-3 px-4">
           <Logo />
+          <span className="h-5 w-px bg-border" />
+          <span className="text-sm font-semibold text-muted-foreground">{t(TAB_LABEL[tab])}</span>
           <div className="flex-1" />
-          <select aria-label={t("common.language")} value={lang} onChange={e => setLang(e.target.value as typeof lang)}
-            className="h-8 rounded-md border bg-card px-1.5 text-xs font-bold text-muted-foreground">
-            {LANGS.map(l => <option key={l.code} value={l.code}>{l.short}</option>)}
-          </select>
-          <div className="text-right leading-tight">
-            <div className="font-semibold">{user.name}</div>
-            <button className="text-xs text-muted-foreground underline" onClick={onLogout}>{t("nav.logout")}</button>
-          </div>
+          <span className={cn("hidden items-center gap-1.5 text-xs font-semibold min-[380px]:flex",
+            live === "local" ? "text-muted-foreground" : live === "on" ? "text-ok" : "text-warn")}>
+            <span className={cn("h-2 w-2 rounded-full", live === "local" ? "bg-muted-foreground" : live === "on" ? "bg-ok animate-pulse" : "bg-warn")} />
+            {t(`live.${live}`)}
+          </span>
+          <button onClick={() => setOpen(true)} aria-label={user.name}
+            className="rounded-full ring-offset-2 focus-visible:ring-2 focus-visible:ring-ring">
+            <Avatar name={user.name} size="sm" />
+          </button>
         </div>
-        <nav className="mx-auto mt-2 flex max-w-xl px-2" aria-label={t("nav.menu")}>
-          {tabs.map(([k, label]) => (
-            <button key={k} onClick={() => onTab(k)} aria-current={tab === k ? "page" : undefined}
-              className={cn("flex-1 border-b-[3px] px-2 py-2.5 text-[15px] font-semibold", tab === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground")}>
-              {label}
-              {k === "saldo" && refill > 0 && <span className="ml-1.5 inline-grid h-5 min-w-5 place-items-center rounded-full bg-warn px-1 text-xs font-bold text-white" aria-label={t("nav.refill", { n: refill })}>{refill}</span>}
-            </button>
-          ))}
-        </nav>
       </header>
+
+      <nav aria-label={t("nav.menu")}
+        className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur supports-[backdrop-filter]:bg-card/85">
+        <div className="mx-auto grid max-w-xl grid-cols-4">
+          {TABS.map(({ k, icon: Icon }) => {
+            const on = tab === k
+            return (
+              <button key={k} onClick={() => onTab(k)} aria-current={on ? "page" : undefined}
+                className={cn("relative flex h-16 flex-col items-center justify-center gap-1 text-[12px] font-semibold transition-colors",
+                  on ? "text-primary" : "text-muted-foreground")}>
+                {on && <span className="absolute inset-x-6 top-0 h-[3px] rounded-b bg-primary" />}
+                <span className="relative">
+                  <Icon className="h-6 w-6" strokeWidth={on ? 2.4 : 1.9} />
+                  {k === "saldo" && refill > 0 && (
+                    <span aria-hidden className="absolute -right-2.5 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-warn px-1 text-[11px] font-bold text-white ring-2 ring-card">{refill}</span>
+                  )}
+                </span>
+                {t(TAB_LABEL[k])}
+                {k === "saldo" && refill > 0 && <span className="sr-only">, {t("nav.refill", { n: refill })}</span>}
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="bottom" className="mx-auto max-w-xl rounded-t-2xl pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
+          <SheetHeader className="text-left">
+            <div className="flex items-center gap-3">
+              <Avatar name={user.name} size="lg" />
+              <div>
+                <SheetTitle className="text-xl font-extrabold">{user.name}</SheetTitle>
+                <SheetDescription>{t(`role.${user.role}`)}</SheetDescription>
+              </div>
+            </div>
+          </SheetHeader>
+          <div className="mt-5 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("common.language")}</div>
+          <div className="mt-2 grid grid-cols-4 gap-1.5">
+            {LANGS.map(l => (
+              <button key={l.code} onClick={() => l.code !== lang && setLang(l.code)} aria-pressed={l.code === lang}
+                className={cn("h-11 rounded-md border text-sm font-semibold", l.code === lang ? "border-primary bg-primary text-primary-foreground" : "bg-card")}>{l.name}</button>
+            ))}
+          </div>
+          <div className="mt-5 divide-y rounded-lg border">
+            <a href="/etiketter.html" className="flex items-center gap-3 px-4 py-3 text-[15px] font-medium"><Barcode className="h-5 w-5 text-muted-foreground" />{t("link.labels")}</a>
+            {user.role === "ledare" && <a href="/admin.html" className="flex items-center gap-3 px-4 py-3 text-[15px] font-medium"><LayoutDashboard className="h-5 w-5 text-muted-foreground" />{t("link.admin")}</a>}
+            <button onClick={() => { setOpen(false); onReset() }} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] font-medium"><RotateCcw className="h-5 w-5 text-muted-foreground" />{t("link.reset")}</button>
+          </div>
+          <p className="mt-4 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">{t("queue.demo")}</p>
+          <Button variant="outline" className="mt-4 h-12 w-full text-base font-semibold" onClick={onLogout}><LogOut className="!h-4 !w-4" />{t("nav.logout")}</Button>
+        </SheetContent>
+      </Sheet>
     </>
+  )
+}
+
+// Visas medan orderkön hämtas: samma form som kön, så sidan inte hoppar när datan kommer.
+function Skeleton() {
+  const bar = "animate-pulse rounded-md bg-muted"
+  return (
+    <div className="min-h-screen" aria-busy="true" aria-label={t("common.loading")}>
+      <div className="h-14 border-b bg-card" />
+      <main className="mx-auto max-w-xl px-4">
+        <div className={cn(bar, "mt-6 h-7 w-40")} />
+        <div className={cn(bar, "mt-2 h-4 w-56")} />
+        <div className="mt-4 grid grid-cols-4 gap-2">{[0, 1, 2, 3].map(k => <div key={k} className={cn(bar, "h-16")} />)}</div>
+        <div className="mt-8 grid gap-2.5">{[0, 1, 2].map(k => <div key={k} className={cn(bar, "h-32 rounded-xl")} />)}</div>
+      </main>
+    </div>
   )
 }
 
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
-  orders: Order[]; user: User; sync: SyncStatus; onStart: (ids: string[]) => void; onOpen: () => void; onReset: () => void
+function Queue({ orders, user, onStart, onOpen }: {
+  orders: Order[]; user: User; onStart: (ids: string[]) => void; onOpen: () => void
 }) {
   const me = user.name
   const [picked, setPicked] = useState<string[]>([])
@@ -318,20 +373,15 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
   ]
   return (
     <>
-      <main className="mx-auto max-w-xl px-4 pb-24">
+      <main className="mx-auto max-w-xl px-4 pb-36">
         <div className="mt-5 flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{t("queue.hi", { name: me })}</h1>
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(`role.${user.role}`)}</span>
-          <span className={cn("ml-auto flex items-center gap-1.5 text-xs font-semibold",
-            store.mode === "local" ? "text-muted-foreground" : sync.online ? "text-ok" : "text-warn")}>
-            <span className={cn("h-2 w-2 rounded-full", store.mode === "local" ? "bg-muted-foreground" : sync.online ? "bg-ok" : "bg-warn")} />
-            {store.mode === "local" ? t("live.local") : sync.online ? t("live.on") : t("live.off")}
-          </span>
         </div>
         <p className="text-muted-foreground">{t("queue.waiting", { n: cnt("ny") })}</p>
         <div className="mt-4 grid grid-cols-4 gap-2">
           {(["ny", "plock", "avv", "pack"] as Status[]).map(k => (
-            <div key={k} className="rounded-md border bg-card px-2.5 py-2">
+            <div key={k} className="rounded-lg border bg-card px-2.5 py-2.5 shadow-sm">
               <div className={cn("text-2xl font-extrabold leading-none tabular-nums", k === "avv" && cnt(k) > 0 && "text-destructive")}>{cnt(k)}</div>
               <div className="mt-1 text-[11px] font-medium leading-tight text-muted-foreground">{t(`kpi.${k}`)}</div>
             </div>
@@ -346,7 +396,7 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
                 const doneRows = o.lines.filter(lineDone).length
                 const on = chosen.includes(o.id)
                 return (
-                  <article key={o.id} className={cn("rounded-md border bg-card p-3.5", (mine || on) && "border-primary ring-1 ring-primary")}>
+                  <article key={o.id} className={cn("rise rounded-xl border bg-card p-3.5 shadow-sm transition-shadow", (mine || on) && "border-primary ring-1 ring-primary")}>
                     <div className="flex flex-wrap items-center gap-2">
                       <ShipBadge o={o} />
                       <span className="font-mono text-[13px] text-muted-foreground">#{o.id}</span>
@@ -380,15 +430,9 @@ function Queue({ orders, user, sync, onStart, onOpen, onReset }: {
         ))}
         {active && <p className="mt-4 text-sm text-muted-foreground">{t("queue.active")}</p>}
         {!active && !chosen.length && cnt("ny") > 1 && <p className="mt-4 text-sm text-muted-foreground">{t("queue.tip", { n: MAX_ROUND })}</p>}
-        <p className="mt-8 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">{t("queue.demo")}</p>
-        <div className="mt-3 flex justify-center gap-5">
-          <a className="text-sm text-muted-foreground underline" href="/etiketter.html">{t("link.labels")}</a>
-          {user.role === "ledare" && <a className="text-sm text-muted-foreground underline" href="/admin.html">{t("link.admin")}</a>}
-          <button className="text-sm text-muted-foreground underline" onClick={onReset}>{t("link.reset")}</button>
-        </div>
       </main>
       {chosen.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-card px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
+        <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] z-30 border-t bg-card px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
           <div className="mx-auto flex max-w-xl items-center gap-3">
             <div className="min-w-0 flex-1 text-sm leading-tight">
               <div className="font-bold">{t("round.n", { n: chosen.length })}</div>
@@ -450,7 +494,7 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
           )}
         </div>
       </Header>
-      <main className="mx-auto max-w-xl px-4 pb-24">
+      <main className="mx-auto max-w-xl px-4 pb-36">
         <div className="mt-4 flex justify-between text-sm tabular-nums text-muted-foreground">
           <span>{t("pick.rows", { a: done, b: lines.length })}</span>
           {(() => { const first = [...r.orders].sort((a, b) => a.due.localeCompare(b.due))[0]; return <span className="flex items-center gap-1.5"><ShipBadge o={first} />{t("pick.out", { t: first.due })}</span> })()}
@@ -504,8 +548,8 @@ function Pick({ r, products, sel, setSel, shakeN, onBack, onScan, onNoCamera, on
             <ScanBar placeholder={step === 1 ? t("scan.shelf") : t("scan.item")} onScan={onScan} onNoCamera={onNoCamera}
               hint={step === 1 ? t("hint.shelf") : t("hint.item")} focusKey={`${i}-${line.locOk}-${line.picked}`} />
 
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+            <div className="demo-box mt-3 flex flex-wrap items-center gap-2">
+              <DemoLabel />
               {step === 1 ? (
                 <>
                   <Chip onClick={() => onScan(p.loc)}>{t("chip.rightShelf")} <code className="font-mono text-xs text-muted-foreground">{p.loc}</code></Chip>
@@ -644,7 +688,7 @@ function Done({ r, products, onBack, onSend }: { r: Round; products: Products; o
   return (
     <>
       <Header><Button variant="ghost" className="-ml-3 h-10 px-2 text-base font-semibold" onClick={onBack}><ChevronLeft className="!h-5 !w-5" />{t("done.back")}</Button></Header>
-      <main className="mx-auto max-w-xl px-4 pb-24">
+      <main className="mx-auto max-w-xl px-4 pb-36">
         <h1 className="mt-6 text-[34px] font-extrabold leading-tight tracking-tight">{devs.length ? t("done.dev") : t("done.ok")}</h1>
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border bg-card p-4 tabular-nums">
           {rows.map(([k, v]) => (<Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="m-0 text-right font-semibold">{v}</dd></Fragment>))}
