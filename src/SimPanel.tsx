@@ -1,6 +1,6 @@
 // Panelen i översikten som startar simuleringen och visar flödet live.
 import { useEffect, useState } from "react"
-import { AlertTriangle, ArrowRight, Inbox, PackageCheck, PackagePlus, Pause, Play, ScanLine, Send, UserCheck } from "lucide-react"
+import { AlertTriangle, ArrowRight, ClipboardCheck, Inbox, PackageCheck, PackagePlus, Pause, Play, ScanLine, Send, UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { kolli, lineDone, type Snapshot, type Status } from "./data"
@@ -15,6 +15,7 @@ const ICON: Record<SimKind, { icon: typeof Inbox; cls: string }> = {
   done: { icon: PackageCheck, cls: "bg-ok-soft text-ok" },
   pack: { icon: Send, cls: "bg-ok-soft text-ok" },
   in: { icon: PackagePlus, cls: "bg-accent/60 text-accent-foreground" },
+  count: { icon: ClipboardCheck, cls: "bg-secondary text-secondary-foreground" },
 }
 const STAGES: { s: Status[]; label: string; cls: string }[] = [
   { s: ["ny"], label: "Nya", cls: "bg-secondary" },
@@ -36,7 +37,7 @@ export default function SimPanel({ sim, snap, shared }: { sim: Simulation; snap:
     const left = mine.flatMap(o => o.lines).filter(l => !lineDone(l)).length
     const done = mine.reduce((n, o) => n + o.lines.reduce((m, l) => m + l.picked, 0), 0)
     return { name, role: "Plockare", text: mine.length ? `Plockar ${mine.map(o => o.id).join(", ")} · ${done}/${mine.reduce((n, o) => n + kolli(o), 0)} kolli${left ? "" : ", klar"}` : "Väntar på order" }
-  }), { name: SIM_PACKER, role: "Pack och inleverans", text: count(["pack", "avv"]) ? `${count(["pack", "avv"])} order att packa` : "Fyller på hyllor" }]
+  }), { name: SIM_PACKER, role: "Pack, inleverans och inventering", text: count(["pack", "avv"]) ? `${count(["pack", "avv"])} order att packa` : "Fyller på hyllor" }]
 
   return (
     <section id="simulering" className="scroll-mt-28 overflow-hidden rounded-xl border bg-card shadow-sm">
@@ -85,8 +86,8 @@ export default function SimPanel({ sim, snap, shared }: { sim: Simulation; snap:
             ))}
           </div>
 
-          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-5">
-            {([["Nya order", sim.stats.orders], ["Plockade kolli", sim.stats.picks], ["Skickade", sim.stats.packed], ["Avvikelser", sim.stats.devs], ["Inlevererat", sim.stats.received]] as const).map(([k, v]) => (
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-6">
+            {([["Nya order", sim.stats.orders], ["Plockade kolli", sim.stats.picks], ["Skickade", sim.stats.packed], ["Avvikelser", sim.stats.devs], ["Inlevererat", sim.stats.received], ["Inventerat", sim.stats.counted]] as const).map(([k, v]) => (
               <div key={k}><dt className="text-xs text-muted-foreground">{k}</dt><dd className="font-bold tabular-nums">{v}</dd></div>
             ))}
           </dl>
