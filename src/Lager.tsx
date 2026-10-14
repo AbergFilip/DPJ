@@ -1,10 +1,11 @@
 // Inleverans (skanna in varor på hyllan) och saldo per hyllplats.
 import { useEffect, useState } from "react"
-import { ClipboardCheck, Minus, PackagePlus, Plus, Search, TrendingDown } from "lucide-react"
+import { ClipboardCheck, ListOrdered, Minus, PackagePlus, Plus, Search, TrendingDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { reserved, type Order, type Product, type Products, type StockMove } from "./data"
 import { Chip, Pict, ScanBar, DemoLabel } from "./parts"
+import { countTips } from "./prio"
 import { lang, t } from "./i18n"
 
 type Say = (kind: "ok" | "err" | "warn", title: string, sub?: string, sticky?: boolean) => void
@@ -142,8 +143,8 @@ export type StockRow = ReturnType<typeof stockRows>[number]
 // Raderna som behöver påfyllnad, sämst först.
 export const refillRows = (rows: StockRow[]) => rows.filter(r => r.need > 0).sort((a, b) => (b.short ? 1 : 0) - (a.short ? 1 : 0) || b.need - a.need)
 
-export function Saldo({ products, orders, onRefill, onCount }: {
-  products: Products; orders: Order[]; onRefill: (sku: string) => void; onCount: (sku: string) => void
+export function Saldo({ products, orders, moves, onRefill, onCount }: {
+  products: Products; orders: Order[]; moves: StockMove[]; onRefill: (sku: string) => void; onCount: (sku: string) => void
 }) {
   const [q, setQ] = useState("")
   const [onlyLow, setOnlyLow] = useState(false)
@@ -153,6 +154,7 @@ export function Saldo({ products, orders, onRefill, onCount }: {
     (!needle || [r.p.loc, r.p.name, r.p.variant, r.p.sku, r.p.ean].some(x => x.toLowerCase().includes(needle))))
   const shortN = rows.filter(r => r.short).length, lowN = rows.filter(r => r.low).length
   const refill = refillRows(rows)
+  const tips = countTips(products, orders, moves).slice(0, 4)
 
   return (
     <main className="mx-auto max-w-xl px-4 pb-36">
@@ -182,7 +184,7 @@ export function Saldo({ products, orders, onRefill, onCount }: {
               <div className="mt-2 flex items-center gap-2">
                 <span className="flex-1 text-xs text-muted-foreground">
                   {t("s.onShelf", { n: r.p.stock })}{r.reserved > 0 ? t("s.inQueue", { n: r.reserved }) : ""}
-                  {r.short ? <b className="ml-1.5 rounded bg-bad-soft px-1 text-destructive">{t("s.shortBadge")}</b> : <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">{t("s.lowBadge")}</b>}
+                  {r.short ? <b className="ml-1.5 whitespace-nowrap rounded bg-bad-soft px-1 text-destructive">{t("s.shortBadge")}</b> : <b className="ml-1.5 rounded bg-warn-soft px-1 text-warn">{t("s.lowBadge")}</b>}
                 </span>
                 <Button variant="outline" className="h-10" onClick={() => onCount(r.p.sku)}>{t("s.count")}</Button>
                 <Button className="h-10" onClick={() => onRefill(r.p.sku)}>{t("s.fill")}</Button>
@@ -191,6 +193,26 @@ export function Saldo({ products, orders, onRefill, onCount }: {
           ))}
         </div>
       ) : <p className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">{t("s.noRefill")}</p>}
+
+      <h2 className="mb-2 mt-7 flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        <ListOrdered className="h-4 w-4" />{t("s.countFirst")}
+      </h2>
+      <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
+        {tips.map((x, i) => {
+          const p = products[x.sku]
+          return (
+            <div key={x.sku} className="flex items-center gap-3 border-t px-3 py-2.5 first:border-t-0">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold">{i + 1}</span>
+              <span className="min-w-0 flex-1 text-sm">
+                <span className="block truncate font-semibold"><span className="tabular-nums">{p.loc}</span> · {p.name}</span>
+                <span className={cn("block text-xs", x.reason === "dev" || x.reason === "short" ? "text-destructive" : "text-muted-foreground")}>{t(`tip.${x.reason}`, { n: x.picks })}</span>
+              </span>
+              <Button variant="outline" className="h-10" onClick={() => onCount(p.sku)}>{t("s.count")}</Button>
+            </div>
+          )
+        })}
+        {!tips.length && <p className="px-3 py-3 text-sm text-muted-foreground">{t("s.noTips")}</p>}
+      </div>
 
       <h2 className="mb-2 mt-7 text-[13px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{t("s.all")}</h2>
       <div className="mt-4 flex gap-2">

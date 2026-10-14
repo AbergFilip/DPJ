@@ -16,6 +16,7 @@ import { currentUser, logout, type User } from "./auth"
 import { LANGS, lang, setLang, t } from "./i18n"
 import Login, { Avatar, Logo } from "./Login"
 import { Chip, Header, Pict, ScanBar, DemoLabel } from "./parts"
+import { allocate, queueOrder } from "./prio"
 import { Inleverans, Inventering, Saldo, refillRows, stockRows } from "./Lager"
 import { Pack, PackingSlip } from "./Pack"
 
@@ -157,10 +158,10 @@ function Picking({ user, onLogout }: { user: User; onLogout: () => void }) {
           onPack={(id, w) => store.pack(id, me, w)}
           onPrint={o => { setSlip(o); setTimeout(() => window.print(), 150) }} />
       )}
-      {view.name === "saldo" && <Saldo products={products} orders={orders}
+      {view.name === "saldo" && <Saldo products={products} orders={orders} moves={snap.moves}
         onRefill={sku => goSku("inleverans", sku)} onCount={sku => goSku("inventering", sku)} />}
       {view.name === "queue" && (
-        <Queue orders={orders} user={user}
+        <Queue orders={orders} products={products} user={user}
           onStart={ids => once(async () => {
             if (await store.claimMany(ids, me)) go({ name: "pick" })
             else say("warn", ids.length > 1 ? t("f.takenMany") : t("f.taken"), t("f.takenSub"))
@@ -355,20 +356,23 @@ function Skeleton() {
 
 /* ---------- Orderkö ---------- */
 
-function Queue({ orders, user, onStart, onOpen }: {
-  orders: Order[]; user: User; onStart: (ids: string[]) => void; onOpen: () => void
+function Queue({ orders, products, user, onStart, onOpen }: {
+  orders: Order[]; products: Products; user: User; onStart: (ids: string[]) => void; onOpen: () => void
 }) {
   const me = user.name
   const [picked, setPicked] = useState<string[]>([])
   const rank = (o: Order) => ({ plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }[o.status] * 10 + (o.ship === "exp" ? 0 : 5))
-  const list = [...orders].sort((a, b) => rank(a) - rank(b) || a.due.localeCompare(b.due))
+  const alloc = allocate(orders, products)
+  const list = queueOrder([...orders].sort((a, b) => rank(a) - rank(b) || a.due.localeCompare(b.due)), alloc)
+  const restOf = (o: Order) => o.status === "ny" ? alloc.get(o.id)?.short ?? [] : []
   const cnt = (k: Status) => orders.filter(o => o.status === k).length
   const active = orders.find(o => o.status === "plock" && o.picker === me)
   const chosen = picked.filter(id => orders.some(o => o.id === id && o.status === "ny"))
   const toggle = (id: string) => setPicked(chosen.includes(id) ? chosen.filter(x => x !== id) : [...chosen, id].slice(0, MAX_ROUND))
   const groups: [string, Order[]][] = [
     [t("group.now"), list.filter(o => o.status === "plock")],
-    [t("group.today"), list.filter(o => o.status === "ny")],
+    [t("group.today"), list.filter(o => o.status === "ny" && !restOf(o).length)],
+    [t("group.rest"), list.filter(o => restOf(o).length > 0)],
     [t("group.done"), list.filter(o => o.status === "pack" || o.status === "avv" || o.status === "skickad")],
   ]
   return (
@@ -414,6 +418,12 @@ function Queue({ orders, user, onStart, onOpen }: {
                       <span>{t("queue.rows", { n: o.lines.length, k: kolli(o) })}</span>
                       {o.status === "plock" && <span>{t("queue.doneRows", { a: doneRows, b: o.lines.length })}</span>}
                     </div>
+                    {restOf(o).length > 0 && (
+                      <div className="mt-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-[13px] text-warn">
+                        {restOf(o).map(x => <div key={x.sku} className="font-semibold">{t("queue.rest", { n: x.missing, name: products[x.sku]?.name ?? x.sku })}</div>)}
+                        <div className="text-xs opacity-90">{t("queue.restHint")}</div>
+                      </div>
+                    )}
                     <div className="mt-3 flex items-center gap-2">
                       <Pill s={o.status} />
                       <div className="flex-1" />

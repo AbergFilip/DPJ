@@ -1,6 +1,6 @@
 // Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
-import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowLeft, Camera, Clock, LogOut, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { AlertTriangle, ArrowLeft, Camera, ClipboardCheck, Clock, Hourglass, LogOut, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
@@ -12,6 +12,9 @@ import ImportPanel from "./ImportPanel"
 import { refillRows, stockRows } from "./Lager"
 import { DAY_END, DAY_START, errorsPerWeek, picksPerHour } from "./stats"
 import { Button } from "@/components/ui/button"
+import { Simulation } from "./sim"
+import { allocate, countTips } from "./prio"
+import SimPanel from "./SimPanel"
 
 const store = createStore()
 
@@ -23,6 +26,10 @@ const STATUS: Record<Status, { label: string; cls: string }> = {
   skickad: { label: "Skickad", cls: "bg-secondary text-secondary-foreground" },
 }
 const MOVE = { in: "Inleverans", plock: "Plock", avvikelse: "Avvikelse", inventering: "Inventering" }
+const TIP = {
+  dev: () => "Avvikelse sedan senaste räkning", short: () => "Saldot räcker inte till kön", empty: () => "Saldot säger tomt",
+  busy: (n: number) => `${n} plockade sedan räkning`, never: () => "Aldrig räknad", old: () => "Över 30 dagar sedan räkning",
+}
 const ORDER: Record<Status, number> = { plock: 0, ny: 1, avv: 2, pack: 3, skickad: 4 }
 
 const dueAt = (o: Order) => { const [h, m] = o.due.split(":").map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime() }
@@ -142,7 +149,10 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [now, setNow] = useState(Date.now())
   const [filter, setFilter] = useState<Status | "alla">("alla")
 
-  useEffect(() => store.subscribe(s => { setSnap(s); setError(null) }, setError), [])
+  const snapRef = useRef<Snapshot | null>(null)
+  const [sim] = useState(() => new Simulation(store, () => snapRef.current))
+  useEffect(() => store.subscribe(s => { snapRef.current = s; setSnap(s); setError(null) }, setError), [])
+  useEffect(() => () => sim.stop(), [sim])
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
 
   const orders = useMemo(() => snap ? [...snap.orders].sort((a, b) =>
@@ -172,6 +182,9 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const stock = stockRows(products, orders)
   const refill = refillRows(stock)
   const shown = filter === "alla" ? orders : orders.filter(o => o.status === filter)
+  const alloc = allocate(orders, products)
+  const rest = orders.filter(o => o.status === "ny" && !alloc.get(o.id)?.ok)
+  const tips = countTips(products, orders, snap.moves, now).slice(0, 8)
 
   const pickers = [...new Set([...USERS.filter(u => u.role === "plock").map(u => u.name), ...orders.map(o => o.picker).filter((x): x is string => !!x)])].map(name => {
     const mine = done.filter(o => o.picker === name)
@@ -203,7 +216,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground"><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Logga ut</span></Button>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2 text-sm font-medium" aria-label="Avsnitt">
-          {[["order", "Order"], ["plockare", "Plockare"], ["statistik", "Statistik"], ["avvikelser", "Avvikelser"], ["saldo", "Saldo"], ["import", "Import"]].map(([id, label]) => (
+          {[["simulering", "Simulering"], ["order", "Order"], ["prioritering", "Prioritering"], ["plockare", "Plockare"], ["statistik", "Statistik"], ["avvikelser", "Avvikelser"], ["saldo", "Saldo"], ["import", "Import"]].map(([id, label]) => (
             <a key={id} href={`#${id}`} className="whitespace-nowrap rounded-full px-3 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">{label}</a>
           ))}
         </nav>
@@ -211,15 +224,18 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
       {error && <div className="bg-bad-soft px-4 py-2 text-center text-sm text-destructive">{error}</div>}
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
           <Kpi icon={<Clock className="h-4 w-4" />} label="Väntar" value={count("ny")} sub={`${orders.filter(o => o.status === "ny").reduce((n, o) => n + kolli(o), 0)} kolli`} />
           <Kpi icon={<Users className="h-4 w-4" />} label="Plockas nu" value={count("plock")} tone="warn" />
           <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" sub={`${count("skickad")} skickade`} />
           <Kpi icon={<AlertTriangle className="h-4 w-4" />} label="Avvikelser" value={count("avv")} tone={count("avv") ? "bad" : undefined} sub={`${deviations.length} ${deviations.length === 1 ? "rad" : "rader"}`} />
           <Kpi icon={<Timer className="h-4 w-4" />} label="Snitt plocktid" value={avgMin != null ? `${mins(avgMin)} min` : "–"} sub={`${done.length} klara order`} />
           <Kpi icon={<TrendingDown className="h-4 w-4" />} label="Att fylla på" value={refill.length} tone={refill.length ? "warn" : "ok"} sub={refill.length ? `${refill.reduce((n, r) => n + r.need, 0)} st totalt` : "alla hyllor räcker"} />
+          <Kpi icon={<Hourglass className="h-4 w-4" />} label="Restorder" value={rest.length} tone={rest.length ? "warn" : "ok"} sub={rest.length ? "väntar på varor" : "allt kan plockas"} />
           <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
         </div>
+
+        <SimPanel sim={sim} snap={snap} shared={store.mode === "supabase"} />
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <Section id="order" title="Alla order" right={
@@ -251,7 +267,10 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
                           <span className={cn(isLate(o, now) && "font-bold text-destructive")}>{o.due}</span>
                           <span className="ml-1 text-muted-foreground">{o.shipTxt}</span>
                         </td>
-                        <td className="px-2 py-2.5"><Badge className={cn("rounded shadow-none", STATUS[o.status].cls)}>{STATUS[o.status].label}</Badge></td>
+                        <td className="whitespace-nowrap px-2 py-2.5"><Badge className={cn("rounded shadow-none", STATUS[o.status].cls)}>{STATUS[o.status].label}</Badge>
+                          {o.status === "ny" && (alloc.get(o.id)?.ok
+                            ? <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">prio {alloc.get(o.id)!.rank}</span>
+                            : <Badge className="ml-1.5 rounded bg-warn-soft text-warn shadow-none hover:bg-warn-soft">Rest</Badge>)}</td>
                         <td className="px-2 py-2.5">{o.picker ?? <span className="text-muted-foreground">–</span>}</td>
                         <td className="px-2 py-2.5 tabular-nums">{picked(o)}/{kolli(o)}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-muted-foreground">
@@ -308,6 +327,44 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
               </table></div>
             </Section>
           </div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section id="prioritering" title="Restorder, väntar på varor" right={<span className="text-sm text-muted-foreground">{rest.length} st</span>}>
+            <div className="divide-y">
+              {rest.map(o => (
+                <div key={o.id} className="px-4 py-3 text-sm">
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-bold tabular-nums">{o.id}</span><span>{o.cust}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{o.ship === "exp" ? "Express, " : ""}klart senast {o.due}</span>
+                  </div>
+                  {alloc.get(o.id)!.short.map(x => (
+                    <div key={x.sku} className="mt-1 text-warn">Saknas {x.missing} st {products[x.sku]?.name}, {products[x.sku]?.variant} · {products[x.sku]?.loc}</div>
+                  ))}
+                </div>
+              ))}
+              {!rest.length && <p className="px-4 py-4 text-sm text-muted-foreground">Alla order i kön kan plockas kompletta.</p>}
+            </div>
+            <p className="border-t px-4 py-2.5 text-xs text-muted-foreground">
+              När saldot inte räcker går order som kan skickas hela först: de som redan plockas, sedan express, sedan tidigast klart-senast och sist äldst. Restorder reserverar inget och flyttas upp när hyllan fyllts på.
+            </p>
+          </Section>
+          <Section title="Inventera först" right={<ClipboardCheck className="h-4 w-4 text-muted-foreground" />}>
+            <div className="divide-y">
+              {tips.map((x, i) => {
+                const p = products[x.sku]
+                return (
+                  <div key={x.sku} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold">{i + 1}</span>
+                    <span className="w-16 shrink-0 font-bold tabular-nums">{p.loc}</span>
+                    <span className="min-w-0 flex-1 truncate">{p.name}<span className="text-muted-foreground">, {p.variant}</span></span>
+                    <span className={cn("shrink-0 text-xs", x.reason === "dev" || x.reason === "short" ? "font-semibold text-destructive" : "text-muted-foreground")}>{TIP[x.reason](x.picks)}</span>
+                  </div>
+                )
+              })}
+              {!tips.length && <p className="px-4 py-4 text-sm text-muted-foreground">Inget att inventera just nu.</p>}
+            </div>
+          </Section>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
