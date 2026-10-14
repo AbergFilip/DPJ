@@ -1,5 +1,5 @@
 // Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, ArrowLeft, Camera, Clock, LogOut, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -12,6 +12,8 @@ import ImportPanel from "./ImportPanel"
 import { refillRows, stockRows } from "./Lager"
 import { DAY_END, DAY_START, errorsPerWeek, picksPerHour } from "./stats"
 import { Button } from "@/components/ui/button"
+import { Simulation } from "./sim"
+import SimPanel from "./SimPanel"
 
 const store = createStore()
 
@@ -142,7 +144,10 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [now, setNow] = useState(Date.now())
   const [filter, setFilter] = useState<Status | "alla">("alla")
 
-  useEffect(() => store.subscribe(s => { setSnap(s); setError(null) }, setError), [])
+  const snapRef = useRef<Snapshot | null>(null)
+  const [sim] = useState(() => new Simulation(store, () => snapRef.current))
+  useEffect(() => store.subscribe(s => { snapRef.current = s; setSnap(s); setError(null) }, setError), [])
+  useEffect(() => () => sim.stop(), [sim])
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
 
   const orders = useMemo(() => snap ? [...snap.orders].sort((a, b) =>
@@ -203,7 +208,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground"><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Logga ut</span></Button>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2 text-sm font-medium" aria-label="Avsnitt">
-          {[["order", "Order"], ["plockare", "Plockare"], ["statistik", "Statistik"], ["avvikelser", "Avvikelser"], ["saldo", "Saldo"], ["import", "Import"]].map(([id, label]) => (
+          {[["simulering", "Simulering"], ["order", "Order"], ["plockare", "Plockare"], ["statistik", "Statistik"], ["avvikelser", "Avvikelser"], ["saldo", "Saldo"], ["import", "Import"]].map(([id, label]) => (
             <a key={id} href={`#${id}`} className="whitespace-nowrap rounded-full px-3 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">{label}</a>
           ))}
         </nav>
@@ -220,6 +225,8 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           <Kpi icon={<TrendingDown className="h-4 w-4" />} label="Att fylla på" value={refill.length} tone={refill.length ? "warn" : "ok"} sub={refill.length ? `${refill.reduce((n, r) => n + r.need, 0)} st totalt` : "alla hyllor räcker"} />
           <Kpi icon={<Truck className="h-4 w-4" />} label="Sena" value={late.length} tone={late.length ? "bad" : "ok"} sub="passerat klart-senast" />
         </div>
+
+        <SimPanel sim={sim} snap={snap} shared={store.mode === "supabase"} />
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <Section id="order" title="Alla order" right={
