@@ -4,7 +4,7 @@ import { ClipboardCheck, Minus, PackagePlus, Plus, Search, TrendingDown } from "
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { reserved, type Order, type Product, type Products, type StockMove } from "./data"
-import { Chip, Pict, ScanBar } from "./parts"
+import { Chip, Pict, ScanBar, DemoLabel } from "./parts"
 import { lang, t } from "./i18n"
 
 type Say = (kind: "ok" | "err" | "warn", title: string, sub?: string, sticky?: boolean) => void
@@ -51,7 +51,7 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
   const recent = moves.filter(m => m.kind === "in").slice(0, 5)
 
   return (
-    <main className="mx-auto max-w-xl px-4 pb-24">
+    <main className="mx-auto max-w-xl px-4 pb-36">
       <h1 className="mt-5 text-2xl font-bold tracking-tight">{t("in.title")}</h1>
       <p className="text-muted-foreground">{p ? t("in.sub2") : t("in.sub")}</p>
 
@@ -92,8 +92,8 @@ export function Inleverans({ products, moves, say, onReceive, onNoCamera, preset
       <ScanBar placeholder={p ? t("in.scan") : t("scan.item")} onScan={onScan} onNoCamera={onNoCamera}
         hint={p ? t("hint.shelf") : t("hint.item")} focusKey={`${sku}-${qty}`} />
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+      <div className="demo-box mt-3 flex flex-wrap items-center gap-2">
+        <DemoLabel />
         {!p ? (
           <>
             {low && <Chip onClick={() => onScan(low.ean)}>{low.name.split(" ")[0]} <span className="text-xs text-muted-foreground">{low.variant}</span></Chip>}
@@ -155,7 +155,7 @@ export function Saldo({ products, orders, onRefill, onCount }: {
   const refill = refillRows(rows)
 
   return (
-    <main className="mx-auto max-w-xl px-4 pb-24">
+    <main className="mx-auto max-w-xl px-4 pb-36">
       <h1 className="mt-5 text-2xl font-bold tracking-tight">{t("s.title")}</h1>
       <p className="text-muted-foreground">
         {shortN ? t("s.short", { n: shortN }) : ""}{lowN ? t("s.low", { n: lowN }) : !shortN ? t("s.allOk") : ""}
@@ -273,7 +273,7 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
   const key = (c: string) => setTyped(c === "<" ? typed.slice(0, -1) : (typed + c).replace(/^0+(?=\d)/, "").slice(0, 4))
 
   return (
-    <main className="mx-auto max-w-xl px-4 pb-24">
+    <main className="mx-auto max-w-xl px-4 pb-36">
       <button className="mt-3 -ml-1 flex items-center gap-1 text-base font-semibold" onClick={onDone}>{t("inv.back")}</button>
       <h1 className="mt-2 text-2xl font-bold tracking-tight">{t("inv.title")}</h1>
       <p className="text-muted-foreground">{p ? t("inv.sub2") : t("inv.sub")}</p>
@@ -341,8 +341,8 @@ export function Inventering({ products, orders, moves, say, preset, onNoCamera, 
             <div className="text-sm">{t("inv.scanEmpty2")}</div>
           </div>
           <ScanBar placeholder={t("inv.scan")} hint={t("hint.shelf")} onScan={onScan} onNoCamera={onNoCamera} focusKey={last?.loc} />
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-muted-foreground">{t("common.test")}</span>
+          <div className="demo-box mt-3 flex flex-wrap items-center gap-2">
+            <DemoLabel />
             {(never[0] ?? all[0]) && <Chip onClick={() => onScan((never[0] ?? all[0]).loc)}>{t("inv.chipShelf")} <code className="font-mono text-xs text-muted-foreground">{(never[0] ?? all[0]).loc}</code></Chip>}
             {rows.find(r => r.need > 0) && <Chip onClick={() => onScan(rows.find(r => r.need > 0)!.p.loc)}>{t("inv.chipLow")}</Chip>}
           </div>

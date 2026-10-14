@@ -1,13 +1,13 @@
 // Översikt för arbetsledaren på datorn: hela kön live, vem som plockar vad, tider och avvikelser med foto.
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, Camera, Clock, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Camera, Clock, LogOut, PackageCheck, Timer, TrendingDown, Truck, Users, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import { kolli, lineDone, mins, sortByLoc, type Order, type Snapshot, type Status, type StockMove } from "./data"
 import { createStore } from "./store"
 import { USERS, currentUser, logout, type User } from "./auth"
-import Login, { Logo } from "./Login"
+import Login, { Avatar, Logo } from "./Login"
 import ImportPanel from "./ImportPanel"
 import { refillRows, stockRows } from "./Lager"
 import { DAY_END, DAY_START, errorsPerWeek, picksPerHour } from "./stats"
@@ -34,18 +34,22 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString("sv-SE", { hour: "
 
 function Kpi({ icon, label, value, sub, tone }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: "ok" | "bad" | "warn" }) {
   return (
-    <div className="rounded-md border bg-card p-4">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">{icon}{label}</div>
-      <div className={cn("mt-1 text-3xl font-extrabold tabular-nums",
+    <div className="rounded-xl border bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-2.5">
+        <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg",
+          tone === "ok" ? "bg-ok-soft text-ok" : tone === "bad" ? "bg-bad-soft text-destructive" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-secondary text-secondary-foreground")}>{icon}</span>
+        <span className="text-xs font-bold uppercase leading-tight tracking-wider text-muted-foreground">{label}</span>
+      </div>
+      <div className={cn("mt-3 text-3xl font-extrabold tabular-nums tracking-tight",
         tone === "ok" && "text-ok", tone === "bad" && "text-destructive", tone === "warn" && "text-warn")}>{value}</div>
-      {sub && <div className="text-sm text-muted-foreground">{sub}</div>}
+      {sub && <div className="mt-0.5 text-sm text-muted-foreground">{sub}</div>}
     </div>
   )
 }
 
-const Section = ({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) => (
-  <section className="min-w-0 rounded-md border bg-card">
-    <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3"><h2 className="flex-1 font-bold">{title}</h2>{right}</div>
+const Section = ({ id, title, children, right }: { id?: string; title: string; children: ReactNode; right?: ReactNode }) => (
+  <section id={id} className="min-w-0 scroll-mt-20 overflow-hidden rounded-xl border bg-card shadow-sm">
+    <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3"><h2 className="flex-1 font-bold tracking-tight">{title}</h2>{right}</div>
     {children}
   </section>
 )
@@ -144,7 +148,19 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
   const orders = useMemo(() => snap ? [...snap.orders].sort((a, b) =>
     ORDER[a.status] - ORDER[b.status] || a.due.localeCompare(b.due) || a.id.localeCompare(b.id)) : [], [snap])
 
-  if (!snap) return <div className="p-8 text-muted-foreground">{error ? `Kunde inte hämta data: ${error}` : "Hämtar orderkön…"}</div>
+  if (!snap) return error ? (
+    <div className="mx-auto mt-16 max-w-md rounded-xl border bg-card p-6 text-center shadow-sm">
+      <span className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-bad-soft text-destructive"><AlertTriangle className="h-5 w-5" /></span>
+      <h1 className="mt-3 font-bold">Kunde inte hämta data</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+      <Button className="mt-4" onClick={() => location.reload()}>Försök igen</Button>
+    </div>
+  ) : (
+    <div className="mx-auto max-w-7xl px-4 py-6" aria-busy="true" aria-label="Hämtar orderkön">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-7">{Array.from({ length: 7 }, (_, k) => <div key={k} className="h-28 animate-pulse rounded-xl bg-muted" />)}</div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_380px]"><div className="h-96 animate-pulse rounded-xl bg-muted" /><div className="h-96 animate-pulse rounded-xl bg-muted" /></div>
+    </div>
+  )
   const products = snap.products
 
   const count = (s: Status) => orders.filter(o => o.status === s).length
@@ -171,23 +187,31 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div className="min-h-full bg-background">
-      <header className="border-b bg-header">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+      <header className="sticky top-0 z-30 border-b bg-header/90 backdrop-blur supports-[backdrop-filter]:bg-header/75">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4">
           <Logo />
-          <h1 className="text-lg font-bold">Plock, översikt</h1>
-          <div className="flex-1" />
-          <span className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className={cn("h-2 w-2 rounded-full", store.mode === "supabase" ? "bg-ok" : "bg-warn")} />
+          <span className="hidden h-6 w-px bg-border sm:block" />
+          <h1 className="text-[15px] font-bold">Plock, översikt</h1>
+          <span className={cn("hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold md:flex",
+            store.mode === "supabase" ? "bg-ok-soft text-ok" : "bg-warn-soft text-warn")}>
+            <span className={cn("h-1.5 w-1.5 rounded-full", store.mode === "supabase" ? "animate-pulse bg-ok" : "bg-warn")} />
             {store.mode === "supabase" ? "Live, uppdateras av sig själv" : "Lokal demo, bara den här webbläsaren"}
           </span>
-          <a href="/" className="text-sm text-muted-foreground underline">Till plockappen</a>
-          <span className="text-sm">{user.name} <button className="ml-1 text-muted-foreground underline" onClick={onLogout}>Logga ut</button></span>
+          <div className="flex-1" />
+          <a href="/" className="hidden items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground sm:flex"><ArrowLeft className="h-4 w-4" />Till plockappen</a>
+          <span className="flex items-center gap-2 text-sm font-semibold"><Avatar name={user.name} size="sm" /><span className="hidden sm:inline">{user.name}</span></span>
+          <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground"><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Logga ut</span></Button>
         </div>
+        <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2 text-sm font-medium" aria-label="Avsnitt">
+          {[["order", "Order"], ["plockare", "Plockare"], ["statistik", "Statistik"], ["avvikelser", "Avvikelser"], ["saldo", "Saldo"], ["import", "Import"]].map(([id, label]) => (
+            <a key={id} href={`#${id}`} className="whitespace-nowrap rounded-full px-3 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">{label}</a>
+          ))}
+        </nav>
       </header>
       {error && <div className="bg-bad-soft px-4 py-2 text-center text-sm text-destructive">{error}</div>}
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
           <Kpi icon={<Clock className="h-4 w-4" />} label="Väntar" value={count("ny")} sub={`${orders.filter(o => o.status === "ny").reduce((n, o) => n + kolli(o), 0)} kolli`} />
           <Kpi icon={<Users className="h-4 w-4" />} label="Plockas nu" value={count("plock")} tone="warn" />
           <Kpi icon={<PackageCheck className="h-4 w-4" />} label="Klar för pack" value={count("pack")} tone="ok" sub={`${count("skickad")} skickade`} />
@@ -198,18 +222,18 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-          <Section title="Alla order" right={
+          <Section id="order" title="Alla order" right={
             <div className="flex flex-wrap gap-1">
               {(["alla", "plock", "ny", "avv", "pack", "skickad"] as const).map(s => (
                 <button key={s} onClick={() => setFilter(s)}
-                  className={cn("rounded px-2 py-1 text-xs font-semibold", filter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
+                  className={cn("rounded-full px-2.5 py-1 text-xs font-semibold transition-colors", filter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
                   {s === "alla" ? "Alla" : STATUS[s].label}
                 </button>
               ))}
             </div>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr className="border-b">
                     <th className="px-4 py-2">Order</th><th className="px-2 py-2">Kund</th><th className="px-2 py-2">Klart senast</th>
                     <th className="px-2 py-2">Status</th><th className="px-2 py-2">Plockare</th><th className="px-2 py-2">Plockat</th><th className="px-4 py-2 text-right">Tid</th>
@@ -219,7 +243,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
                   {shown.map(o => {
                     const t = o.startedAt ? (o.doneAt ?? now) - o.startedAt : null
                     return (
-                      <tr key={o.id} className="border-b last:border-0">
+                      <tr key={o.id} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                         <td className="px-4 py-2.5 font-bold tabular-nums">{o.id}</td>
                         <td className="px-2 py-2.5">{o.cust}</td>
                         <td className="whitespace-nowrap px-2 py-2.5 tabular-nums">
@@ -243,7 +267,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           </Section>
 
           <div className="space-y-6">
-            <Section title="Plockas just nu">
+            <Section id="plockare" title="Plockas just nu">
               <div className="divide-y">
                 {active.map(o => {
                   const next = sortByLoc(o.lines, products).find(l => !lineDone(l))
@@ -267,7 +291,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
 
             <Section title="Plockare">
               <div className="overflow-x-auto"><table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr className="border-b"><th className="px-4 py-2">Namn</th><th className="px-2 py-2">Klara</th><th className="px-2 py-2">Kolli</th><th className="px-2 py-2">Snitt</th><th className="px-4 py-2">Avv.</th></tr>
                 </thead>
                 <tbody>
@@ -287,14 +311,14 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Plock per timme i dag"><HourChart moves={snap.moves} now={now} /></Section>
+          <Section id="statistik" title="Plock per timme i dag"><HourChart moves={snap.moves} now={now} /></Section>
           <Section title="Felrate per vecka"><WeekChart orders={orders} now={now} /></Section>
         </div>
 
-        <Section title="Avvikelser att åtgärda" right={<span className="text-sm text-muted-foreground">{deviations.length} st</span>}>
+        <Section id="avvikelser" title="Avvikelser att åtgärda" right={<span className="text-sm text-muted-foreground">{deviations.length} st</span>}>
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
             {deviations.map(({ o, l, p }) => (
-              <div key={l.id} className="flex gap-3 rounded-md border p-3">
+              <div key={l.id} className="flex gap-3 rounded-lg border p-3">
                 {l.dev!.photo
                   ? <a href={l.dev!.photo} target="_blank" rel="noreferrer" className="shrink-0"><img src={l.dev!.photo} alt="Foto på avvikelsen" className="h-20 w-20 rounded object-cover" /></a>
                   : <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded bg-secondary text-[11px] text-muted-foreground"><Camera className="mb-1 h-5 w-5" />Inget foto</div>}
@@ -315,10 +339,10 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-          <Section title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{refill.length} att fylla på · {stock.filter(r => r.short).length} räcker inte</span>}>
+          <Section id="saldo" title="Saldo per hylla" right={<span className="text-sm text-muted-foreground">{refill.length} att fylla på · {stock.filter(r => r.short).length} räcker inte</span>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr className="border-b"><th className="px-4 py-2">Plats</th><th className="px-2 py-2">Artikel</th><th className="px-2 py-2 text-right">Saldo</th><th className="px-2 py-2 text-right">I kön</th><th className="px-2 py-2 text-right">Lediga</th><th className="px-2 py-2 text-right">Min</th><th className="px-2 py-2 text-right">Fyll på</th><th className="px-4 py-2 text-right">Räknad</th></tr>
                 </thead>
                 <tbody>
@@ -357,7 +381,7 @@ function Overview({ user, onLogout }: { user: User; onLogout: () => void }) {
           </Section>
         </div>
 
-        <Section title="Importera order från CSV">
+        <Section id="import" title="Importera order från CSV">
           <ImportPanel products={products} existing={new Set(orders.map(o => o.id))} onImport={list => store.importOrders(list)} />
         </Section>
 
